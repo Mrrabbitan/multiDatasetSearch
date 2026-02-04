@@ -345,11 +345,23 @@ def render_intelligent_qa():
             with tab3:
                 if result.get("messages"):
                     for msg in result["messages"]:
-                        role = msg.get("role", "system")
-                        content = msg.get("content", "")
-                        if role == "user":
+                        # 修复：处理 LangChain 的消息对象
+                        if hasattr(msg, 'type'):
+                            # LangChain 消息对象
+                            role = msg.type if hasattr(msg, 'type') else "system"
+                            content = msg.content if hasattr(msg, 'content') else str(msg)
+                        elif isinstance(msg, dict):
+                            # 字典格式
+                            role = msg.get("role", "system")
+                            content = msg.get("content", "")
+                        else:
+                            # 其他格式
+                            role = "system"
+                            content = str(msg)
+
+                        if role == "user" or role == "human":
                             st.chat_message("user").write(content)
-                        elif role == "assistant":
+                        elif role == "assistant" or role == "ai":
                             st.chat_message("assistant").write(content)
                         else:
                             st.info(f"🔧 {content}")
@@ -398,11 +410,11 @@ def render_multimodal_search():
         col3, col4, col5 = st.columns(3)
         with col3:
             enable_time_filter = st.checkbox("启用时间过滤", value=False)
-            # 修复问题1：使用中文格式
-            start_date = st.date_input("开始日期", format="YYYY年MM月DD日")
+            # 修复：使用 Streamlit 支持的日期格式
+            start_date = st.date_input("开始日期", format="YYYY/MM/DD")
             start_time_t = st.time_input("开始时间", value=time(0, 0))
         with col4:
-            end_date = st.date_input("结束日期", format="YYYY年MM月DD日")
+            end_date = st.date_input("结束日期", format="YYYY/MM/DD")
             end_time_t = st.time_input("结束时间", value=time(23, 59))
         with col5:
             radius_km = st.number_input("半径(公里)", min_value=1.0, max_value=50.0, value=5.0)
