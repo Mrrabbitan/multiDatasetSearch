@@ -6,8 +6,8 @@ paths:
   schema_path: "poc/schema/metadata.sql"
   embeddings_dir: "poc/data/embeddings"
   index_dir: "poc/data/index"
-  trace_db_path: "poc/data/traces.db"  # 新增：追踪数据库
-  log_dir: "poc/logs"  # 新增：日志目录
+  trace_db_path: "logs/traces.db"  # 新增：追踪数据库
+  log_dir: "logs"  # 新增：日志目录（项目根目录下）
 
 ingest:
   asset_id_strategy: "sha256"
