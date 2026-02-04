@@ -124,26 +124,50 @@ def display_media(video_url: str, img_urls: List[str]):
     """显示视频和图片（修复问题2）"""
     # 显示视频
     if video_url and not pd.isna(video_url):
-        video_path = Path(video_url)
-        if video_path.exists():
-            st.video(str(video_path))
-        elif video_url.startswith('http'):
-            st.video(video_url)
-        else:
-            st.info(f"视频文件不存在: {video_url}")
+        # 尝试多个可能的路径
+        possible_paths = [
+            Path(video_url),
+            Path("warning_file") / Path(video_url).name,
+            Path("warning_file") / video_url
+        ]
+
+        video_found = False
+        for video_path in possible_paths:
+            if video_path.exists():
+                st.video(str(video_path))
+                video_found = True
+                break
+
+        if not video_found:
+            if video_url.startswith('http'):
+                st.video(video_url)
+            else:
+                st.info(f"视频文件不存在: {video_url}")
 
     # 显示图片
     if img_urls:
         cols = st.columns(min(len(img_urls), 3))
         for i, img_url in enumerate(img_urls[:3]):  # 最多显示3张
-            img_path = Path(img_url)
+            # 尝试多个可能的路径
+            possible_paths = [
+                Path(img_url),
+                Path("warning_img") / Path(img_url).name,
+                Path("warning_img") / img_url
+            ]
+
             with cols[i % 3]:
-                if img_path.exists():
-                    st.image(str(img_path), use_column_width=True)
-                elif img_url.startswith('http'):
-                    st.image(img_url, use_column_width=True)
-                else:
-                    st.caption(f"图片不存在: {img_path.name}")
+                img_found = False
+                for img_path in possible_paths:
+                    if img_path.exists():
+                        st.image(str(img_path), use_column_width=True)
+                        img_found = True
+                        break
+
+                if not img_found:
+                    if img_url.startswith('http'):
+                        st.image(img_url, use_column_width=True)
+                    else:
+                        st.caption(f"图片不存在: {Path(img_url).name}")
 
 
 # ============================================================================
@@ -257,10 +281,13 @@ def render_intelligent_qa():
     # 问题输入
     col1, col2 = st.columns([3, 1])
     with col1:
+        # 使用 session_state 中的问题（如果有的话）
+        default_question = st.session_state.get('selected_question', "近7天车辆闯入监控告警有多少条？")
         question = st.text_input(
             "请输入您的问题",
-            value="近7天车辆闯入监控告警有多少条？",
-            placeholder="例如：查询最近10条告警"
+            value=default_question,
+            placeholder="例如：查询最近10条告警",
+            key="question_input"
         )
     with col2:
         enable_trace = st.checkbox("启用追踪", value=True, help="记录完整执行过程")
@@ -274,11 +301,15 @@ def render_intelligent_qa():
         "查询2026年1月的告警"
     ]
 
+    # 修复问题3：使用 session_state 保存选中的问题
+    if 'selected_question' not in st.session_state:
+        st.session_state.selected_question = question
+
     cols = st.columns(len(preset_questions))
     for i, q in enumerate(preset_questions):
         if cols[i].button(f"📝 {q[:10]}...", key=f"preset_{i}"):
+            st.session_state.selected_question = q
             question = q
-            st.rerun()
 
     if st.button("🚀 执行查询", type="primary", use_container_width=True):
         config = load_config()
@@ -345,11 +376,23 @@ def render_intelligent_qa():
             with tab3:
                 if result.get("messages"):
                     for msg in result["messages"]:
-                        role = msg.get("role", "system")
-                        content = msg.get("content", "")
-                        if role == "user":
+                        # 修复：处理 LangChain 的消息对象
+                        if hasattr(msg, 'type'):
+                            # LangChain 消息对象
+                            role = msg.type if hasattr(msg, 'type') else "system"
+                            content = msg.content if hasattr(msg, 'content') else str(msg)
+                        elif isinstance(msg, dict):
+                            # 字典格式
+                            role = msg.get("role", "system")
+                            content = msg.get("content", "")
+                        else:
+                            # 其他格式
+                            role = "system"
+                            content = str(msg)
+
+                        if role == "user" or role == "human":
                             st.chat_message("user").write(content)
-                        elif role == "assistant":
+                        elif role == "assistant" or role == "ai":
                             st.chat_message("assistant").write(content)
                         else:
                             st.info(f"🔧 {content}")
@@ -398,11 +441,11 @@ def render_multimodal_search():
         col3, col4, col5 = st.columns(3)
         with col3:
             enable_time_filter = st.checkbox("启用时间过滤", value=False)
-            # 修复问题1：使用中文格式
-            start_date = st.date_input("开始日期", format="YYYY年MM月DD日")
+            # 修复：使用 Streamlit 支持的日期格式
+            start_date = st.date_input("开始日期", format="YYYY/MM/DD")
             start_time_t = st.time_input("开始时间", value=time(0, 0))
         with col4:
-            end_date = st.date_input("结束日期", format="YYYY年MM月DD日")
+            end_date = st.date_input("结束日期", format="YYYY/MM/DD")
             end_time_t = st.time_input("结束时间", value=time(23, 59))
         with col5:
             radius_km = st.number_input("半径(公里)", min_value=1.0, max_value=50.0, value=5.0)
@@ -534,15 +577,22 @@ def render_multimodal_search():
                             # 优先显示原图，如果没有则显示框图
                             img_urls = img_urls_src if img_urls_src else img_urls_icon
 
+                            # 如果 extra_json 中没有媒体URL，使用 file_path 和 file_name
+                            if not video_url and not img_urls:
+                                file_path = item.get("file_path")
+                                file_name = item.get("file_name")
+
+                                if file_name:
+                                    # 使用 file_name 构建路径
+                                    img_urls = [file_name]
+                                elif file_path:
+                                    # 使用 file_path
+                                    img_urls = [file_path]
+
                             if video_url or img_urls:
                                 display_media(video_url, img_urls)
                             else:
-                                # 如果没有媒体URL，尝试使用file_path
-                                file_path = item.get("file_path")
-                                if file_path:
-                                    display_media("", [file_path])
-                                else:
-                                    st.info("无媒体文件")
+                                st.info("无媒体文件")
 
                         st.markdown("---")
 
