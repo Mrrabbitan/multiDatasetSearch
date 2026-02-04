@@ -6,6 +6,8 @@ paths:
   schema_path: "poc/schema/metadata.sql"
   embeddings_dir: "poc/data/embeddings"
   index_dir: "poc/data/index"
+  trace_db_path: "poc/data/traces.db"  # 新增：追踪数据库
+  log_dir: "poc/logs"  # 新增：日志目录
 
 ingest:
   asset_id_strategy: "sha256"
@@ -25,7 +27,26 @@ llm:
   model: "deepseek-chat"
   api_key_env: "DEEPSEEK_API_KEY"
   mode: "rule"  # options: "rule", "llm", "hybrid"
-  api_key: ""   # 可选: 测试环境可直接在此填写 DeepSeek 密钥
+  api_key: "sk-db6292d5ea9d470889b63392c4a4abde"   # 可选: 测试环境可直接在此填写 DeepSeek 密钥
+
+# 新增：Agent 配置
+agent:
+  enabled: true  # 是否启用 LangGraph Agent
+  max_retries: 3  # SQL 执行失败后的最大重试次数
+  enable_trace: true  # 是否启用追踪记录
+  enable_security: true  # 是否启用安全护栏
+
+# 新增：安全配置
+security:
+  allowed_tables:  # 允许访问的表白名单（空表示允许所有）
+    - "events"
+    - "assets"
+    - "detections"
+    - "annotations"
+    - "embeddings"
+  sensitive_tables:  # 敏感表黑名单
+    - "users"
+    - "passwords"
 
 train:
   yolo_model: "yolov8n.pt"

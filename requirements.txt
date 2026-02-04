@@ -12,3 +12,5 @@ opencv-python
 sentence-transformers
 faiss-cpu
 streamlit
+langgraph>=0.2.0
+langchain-core>=0.3.0

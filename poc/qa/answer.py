@@ -1,10 +1,11 @@
 import argparse
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from poc.pipeline.utils import connect_db, load_yaml, resolve_path
 from poc.qa.guardrails import SQLGuardrail, SQLSecurityError
+from poc.qa.trace import QueryTrace, get_trace_manager
 
 try:
     from poc.qa.nl2sql import build_query_plan  # type: ignore
@@ -15,15 +16,16 @@ except ImportError:  # pragma: no cover - backward compatibility with older nl2s
         return _parse_question(text)
 
 
-def run_sql(db_path, sql: str, params: List, validate_security: bool = True) -> List[Dict[str, Any]]:
+def run_sql(db_path, sql: str, params: List, validate_security: bool = True, trace: Optional[QueryTrace] = None) -> List[Dict[str, Any]]:
     """
-    执行 SQL 查询（带安全护栏）
+    执行 SQL 查询（带安全护栏和追踪）
 
     Args:
         db_path: 数据库路径
         sql: SQL 语句
         params: 参数列表
         validate_security: 是否启用安全检查（默认开启）
+        trace: 查询追踪对象（可选）
 
     Returns:
         查询结果列表
@@ -31,17 +33,34 @@ def run_sql(db_path, sql: str, params: List, validate_security: bool = True) -> 
     Raises:
         SQLSecurityError: 如果 SQL 不安全
     """
-    # 安全检查
-    if validate_security:
-        SQLGuardrail.validate_sql(sql)
-        params = SQLGuardrail.sanitize_params(params)
+    # 记录步骤
+    step = None
+    if trace:
+        step = trace.add_step("execute_sql", input_data={"sql": sql, "params": params})
 
-    conn = connect_db(db_path)
     try:
-        rows = conn.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
-    finally:
-        conn.close()
+        # 安全检查
+        if validate_security:
+            SQLGuardrail.validate_sql(sql)
+            params = SQLGuardrail.sanitize_params(params)
+
+        conn = connect_db(db_path)
+        try:
+            rows = conn.execute(sql, params).fetchall()
+            result = [dict(row) for row in rows]
+
+            # 记录成功
+            if step:
+                step.finish(status="success", output_data={"row_count": len(result)})
+
+            return result
+        finally:
+            conn.close()
+    except Exception as e:
+        # 记录错误
+        if step:
+            step.finish(status="error", error=e)
+        raise
 
 
 def run_retrieval(config, question: str, filters: Dict) -> List[Dict[str, Any]]:
@@ -127,29 +146,85 @@ def main() -> None:
     parser.add_argument("--config", default="poc/config/poc.yaml")
     parser.add_argument("--question", required=True)
     parser.add_argument("--with-evidence", action="store_true")
+    parser.add_argument("--user-id", help="用户ID（用于追踪）")
+    parser.add_argument("--session-id", help="会话ID（用于追踪）")
     args = parser.parse_args()
 
     config = load_yaml(args.config)
     db_path = resolve_path(config.get("paths", {}).get("db_path", "poc/data/metadata.db"))
 
-    plan = build_query_plan(args.question, config)
-    sql_rows = run_sql(db_path, plan.sql, plan.params)
+    # 创建追踪对象
+    trace = QueryTrace(
+        question=args.question,
+        user_id=args.user_id,
+        session_id=args.session_id
+    )
 
-    answer = {
-        "question": args.question,
-        "intent": plan.intent,
-        "filters": plan.filters,
-    }
+    try:
+        # 步骤1：解析问题
+        step_parse = trace.add_step("parse_question", input_data={"question": args.question})
+        try:
+            plan = build_query_plan(args.question, config)
+            trace.intent = plan.intent
+            trace.sql = plan.sql
+            trace.sql_params = plan.params
+            step_parse.finish(status="success", output_data={
+                "intent": plan.intent,
+                "sql": plan.sql,
+                "filters": plan.filters
+            })
+        except Exception as e:
+            step_parse.finish(status="error", error=e)
+            raise
 
-    if plan.intent == "count":
-        answer["result"] = sql_rows[0]["cnt"] if sql_rows else 0
-    else:
-        answer["result"] = sql_rows
+        # 步骤2：执行SQL
+        sql_rows = run_sql(db_path, plan.sql, plan.params, trace=trace)
+        trace.result_count = len(sql_rows)
 
-    if args.with_evidence:
-        answer["evidence"] = run_retrieval(config, args.question, plan.filters)
+        answer = {
+            "question": args.question,
+            "intent": plan.intent,
+            "filters": plan.filters,
+            "trace_id": trace.trace_id,  # 返回追踪ID
+        }
 
-    print(json.dumps(answer, ensure_ascii=True, indent=2))
+        if plan.intent == "count":
+            answer["result"] = sql_rows[0]["cnt"] if sql_rows else 0
+            trace.final_answer = answer["result"]
+        else:
+            answer["result"] = sql_rows
+            trace.final_answer = {"count": len(sql_rows)}
+
+        # 步骤3：证据检索（可选）
+        if args.with_evidence:
+            step_evidence = trace.add_step("retrieve_evidence", input_data={"filters": plan.filters})
+            try:
+                evidence = run_retrieval(config, args.question, plan.filters)
+                answer["evidence"] = evidence
+                step_evidence.finish(status="success", output_data={"evidence_count": len(evidence)})
+            except Exception as exc:
+                step_evidence.finish(status="error", error=exc)
+                answer["evidence_error"] = str(exc)
+
+        # 标记查询成功
+        trace.finish(status="success")
+
+        print(json.dumps(answer, ensure_ascii=True, indent=2))
+
+    except Exception as e:
+        # 标记查询失败
+        trace.finish(status="error", error=e)
+        print(json.dumps({
+            "error": str(e),
+            "trace_id": trace.trace_id
+        }, ensure_ascii=True, indent=2))
+        raise
+
+    finally:
+        # 保存追踪记录
+        trace_manager = get_trace_manager()
+        if trace_manager:
+            trace_manager.save_trace(trace)
 
 
 if __name__ == "__main__":
