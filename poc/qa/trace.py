@@ -304,11 +304,27 @@ class TraceManager:
         stats["total_queries"] = conn.execute(f"SELECT COUNT(*) as cnt FROM query_traces {where_sql}", params).fetchone()["cnt"]
 
         # 成功/失败数
-        stats["success_count"] = conn.execute(f"SELECT COUNT(*) as cnt FROM query_traces {where_sql} AND status = 'success'", params).fetchone()["cnt"]
-        stats["error_count"] = conn.execute(f"SELECT COUNT(*) as cnt FROM query_traces {where_sql} AND status = 'error'", params).fetchone()["cnt"]
+        success_sql = f"SELECT COUNT(*) as cnt FROM query_traces {where_sql}"
+        if where_clauses:
+            success_sql += " AND status = 'success'"
+        else:
+            success_sql += " WHERE status = 'success'"
+        stats["success_count"] = conn.execute(success_sql, params).fetchone()["cnt"]
+
+        error_sql = f"SELECT COUNT(*) as cnt FROM query_traces {where_sql}"
+        if where_clauses:
+            error_sql += " AND status = 'error'"
+        else:
+            error_sql += " WHERE status = 'error'"
+        stats["error_count"] = conn.execute(error_sql, params).fetchone()["cnt"]
 
         # 平均耗时
-        avg_duration = conn.execute(f"SELECT AVG(total_duration_ms) as avg FROM query_traces {where_sql} AND total_duration_ms IS NOT NULL", params).fetchone()["avg"]
+        avg_sql = f"SELECT AVG(total_duration_ms) as avg FROM query_traces {where_sql}"
+        if where_clauses:
+            avg_sql += " AND total_duration_ms IS NOT NULL"
+        else:
+            avg_sql += " WHERE total_duration_ms IS NOT NULL"
+        avg_duration = conn.execute(avg_sql, params).fetchone()["avg"]
         stats["avg_duration_ms"] = round(avg_duration, 2) if avg_duration else 0
 
         # 按意图分组统计
