@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, List
 
 from poc.pipeline.utils import connect_db, load_yaml, resolve_path
+from poc.qa.guardrails import SQLGuardrail, SQLSecurityError
 
 try:
     from poc.qa.nl2sql import build_query_plan  # type: ignore
@@ -14,11 +15,33 @@ except ImportError:  # pragma: no cover - backward compatibility with older nl2s
         return _parse_question(text)
 
 
-def run_sql(db_path, sql: str, params: List) -> List[Dict[str, Any]]:
+def run_sql(db_path, sql: str, params: List, validate_security: bool = True) -> List[Dict[str, Any]]:
+    """
+    执行 SQL 查询（带安全护栏）
+
+    Args:
+        db_path: 数据库路径
+        sql: SQL 语句
+        params: 参数列表
+        validate_security: 是否启用安全检查（默认开启）
+
+    Returns:
+        查询结果列表
+
+    Raises:
+        SQLSecurityError: 如果 SQL 不安全
+    """
+    # 安全检查
+    if validate_security:
+        SQLGuardrail.validate_sql(sql)
+        params = SQLGuardrail.sanitize_params(params)
+
     conn = connect_db(db_path)
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
 
 
 def run_retrieval(config, question: str, filters: Dict) -> List[Dict[str, Any]]:
