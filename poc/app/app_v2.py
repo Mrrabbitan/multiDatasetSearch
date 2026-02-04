@@ -1,11 +1,10 @@
 """
-多模态数据底座 - 生产级可视化界面
+多模态数据底座 - 生产级可视化界面（修复版）
 
-功能：
-1. 智能问答（展示 Agent 执行过程）
-2. 多模态检索
-3. 系统监控（追踪统计、性能指标）
-4. 架构展示（让领导看到技术实力）
+修复内容：
+1. 日期选择器中文化
+2. 显示原始图片和视频
+3. 修复数据库路径问题
 """
 
 import json
@@ -34,6 +33,13 @@ from poc.search.query import (
     load_model,
 )
 
+# 设置页面为中文
+st.set_page_config(
+    page_title="多模态数据底座",
+    page_icon="🏗️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # ============================================================================
 # 缓存函数
@@ -62,6 +68,10 @@ def init_systems(config: Dict):
     """初始化系统组件"""
     # 初始化追踪管理器
     trace_db_path = Path(config.get("paths", {}).get("trace_db_path", "logs/traces.db"))
+
+    # 确保目录存在（修复问题3）
+    trace_db_path.parent.mkdir(parents=True, exist_ok=True)
+
     init_trace_manager(
         db_path=trace_db_path,
         enable_file_log=True,
@@ -70,7 +80,8 @@ def init_systems(config: Dict):
 
     # 初始化 Tool 注册中心
     db_path = config.get("paths", {}).get("db_path", "poc/data/metadata.db")
-    init_tool_registry(db_path)
+    if Path(db_path).exists():
+        init_tool_registry(db_path)
 
     return True
 
@@ -80,16 +91,59 @@ def load_config() -> Dict:
 
 
 def db_stats(db_path: Path) -> Dict[str, int]:
+    if not Path(db_path).exists():
+        return {"assets": 0, "events": 0, "detections": 0, "annotations": 0, "embeddings": 0}
+
     conn = connect_db(db_path)
-    stats = {
-        "assets": conn.execute("SELECT COUNT(*) AS cnt FROM assets").fetchone()["cnt"],
-        "events": conn.execute("SELECT COUNT(*) AS cnt FROM events").fetchone()["cnt"],
-        "detections": conn.execute("SELECT COUNT(*) AS cnt FROM detections").fetchone()["cnt"],
-        "annotations": conn.execute("SELECT COUNT(*) AS cnt FROM annotations").fetchone()["cnt"],
-        "embeddings": conn.execute("SELECT COUNT(*) AS cnt FROM embeddings").fetchone()["cnt"],
-    }
-    conn.close()
+    stats = {}
+    try:
+        stats["assets"] = conn.execute("SELECT COUNT(*) AS cnt FROM assets").fetchone()["cnt"]
+        stats["events"] = conn.execute("SELECT COUNT(*) AS cnt FROM events").fetchone()["cnt"]
+        stats["detections"] = conn.execute("SELECT COUNT(*) AS cnt FROM detections").fetchone()["cnt"]
+        stats["annotations"] = conn.execute("SELECT COUNT(*) AS cnt FROM annotations").fetchone()["cnt"]
+        stats["embeddings"] = conn.execute("SELECT COUNT(*) AS cnt FROM embeddings").fetchone()["cnt"]
+    except:
+        stats = {"assets": 0, "events": 0, "detections": 0, "annotations": 0, "embeddings": 0}
+    finally:
+        conn.close()
     return stats
+
+
+# ============================================================================
+# 辅助函数
+# ============================================================================
+
+def parse_media_urls(url_string: str) -> List[str]:
+    """解析逗号分隔的URL字符串"""
+    if not url_string or pd.isna(url_string):
+        return []
+    return [url.strip() for url in str(url_string).split(',') if url.strip()]
+
+
+def display_media(video_url: str, img_urls: List[str]):
+    """显示视频和图片（修复问题2）"""
+    # 显示视频
+    if video_url and not pd.isna(video_url):
+        video_path = Path(video_url)
+        if video_path.exists():
+            st.video(str(video_path))
+        elif video_url.startswith('http'):
+            st.video(video_url)
+        else:
+            st.info(f"视频文件不存在: {video_url}")
+
+    # 显示图片
+    if img_urls:
+        cols = st.columns(min(len(img_urls), 3))
+        for i, img_url in enumerate(img_urls[:3]):  # 最多显示3张
+            img_path = Path(img_url)
+            with cols[i % 3]:
+                if img_path.exists():
+                    st.image(str(img_path), use_column_width=True)
+                elif img_url.startswith('http'):
+                    st.image(img_url, use_column_width=True)
+                else:
+                    st.caption(f"图片不存在: {img_path.name}")
 
 
 # ============================================================================
@@ -230,7 +284,11 @@ def render_intelligent_qa():
         config = load_config()
 
         # 初始化系统
-        init_systems(config)
+        try:
+            init_systems(config)
+        except Exception as e:
+            st.error(f"系统初始化失败: {e}")
+            return
 
         # 创建 Agent
         agent = get_cached_agent(config)
@@ -340,10 +398,11 @@ def render_multimodal_search():
         col3, col4, col5 = st.columns(3)
         with col3:
             enable_time_filter = st.checkbox("启用时间过滤", value=False)
-            start_date = st.date_input("开始日期")
+            # 修复问题1：使用中文格式
+            start_date = st.date_input("开始日期", format="YYYY年MM月DD日")
             start_time_t = st.time_input("开始时间", value=time(0, 0))
         with col4:
-            end_date = st.date_input("结束日期")
+            end_date = st.date_input("结束日期", format="YYYY年MM月DD日")
             end_time_t = st.time_input("结束时间", value=time(23, 59))
         with col5:
             radius_km = st.number_input("半径(公里)", min_value=1.0, max_value=50.0, value=5.0)
@@ -379,70 +438,118 @@ def render_multimodal_search():
             index_dir = resolve_path(config.get("paths", {}).get("index_dir", "poc/data/index"))
             model_name = config.get("search", {}).get("clip_model", "clip-ViT-B-32")
 
-            meta, index_obj = get_cached_index(index_dir)
-            model = get_cached_model(model_name)
+            try:
+                meta, index_obj = get_cached_index(index_dir)
+                model = get_cached_model(model_name)
 
-            query_vec = encode_query(model, query_text, None)
+                query_vec = encode_query(model, query_text, None)
 
-            # 向量检索
-            if meta.get("backend") == "faiss":
-                import faiss
-                scores, idx = index_obj.search(query_vec[None, :], top_k * 3)
-                pairs = list(zip(idx[0].tolist(), scores[0].tolist()))
-            else:
-                import numpy as np
-                vectors = index_obj
-                scores = np.dot(vectors, query_vec)
-                idx = np.argsort(-scores)[:top_k * 3]
-                pairs = list(zip(idx.tolist(), scores[idx].tolist()))
+                # 向量检索
+                if meta.get("backend") == "faiss":
+                    import faiss
+                    scores, idx = index_obj.search(query_vec[None, :], top_k * 3)
+                    pairs = list(zip(idx[0].tolist(), scores[0].tolist()))
+                else:
+                    import numpy as np
+                    vectors = index_obj
+                    scores = np.dot(vectors, query_vec)
+                    idx = np.argsort(-scores)[:top_k * 3]
+                    pairs = list(zip(idx.tolist(), scores[idx].tolist()))
 
-            asset_ids = meta.get("asset_ids", [])
-            candidate_ids = [asset_ids[i] for i, _ in pairs if i < len(asset_ids)]
+                asset_ids = meta.get("asset_ids", [])
+                candidate_ids = [asset_ids[i] for i, _ in pairs if i < len(asset_ids)]
 
-            conn = connect_db(db_path)
-            assets = fetch_asset_context(conn, candidate_ids)
-            conn.close()
+                conn = connect_db(db_path)
 
-            bbox = None
-            if filters.get("lat") is not None and filters.get("lon") is not None:
-                bbox = bbox_filter(filters.get("lat"), filters.get("lon"), filters.get("radius_km", 5.0))
+                # 修复问题2：获取完整的资产信息，包括媒体URL
+                placeholders = ",".join(["?"] * len(candidate_ids))
+                rows = conn.execute(
+                    f"""
+                    SELECT a.asset_id, a.file_path, a.file_name, a.captured_at, a.lat, a.lon,
+                           e.event_type, e.alarm_time, e.extra_json
+                    FROM assets a
+                    LEFT JOIN events e ON a.asset_id = e.asset_id
+                    WHERE a.asset_id IN ({placeholders})
+                    """,
+                    candidate_ids,
+                ).fetchall()
 
-            filtered = apply_filters(
-                assets, filters.get("event_type"), filters.get("start_time"), filters.get("end_time"), bbox
-            )
+                assets = {}
+                for row in rows:
+                    row_dict = dict(row)
+                    # 解析 extra_json 获取媒体URL
+                    if row_dict.get("extra_json"):
+                        try:
+                            extra = json.loads(row_dict["extra_json"])
+                            row_dict["video_url"] = extra.get("video_url", "")
+                            row_dict["file_img_url_src"] = extra.get("file_img_url_src", "")
+                            row_dict["file_img_url_icon"] = extra.get("file_img_url_icon", "")
+                        except:
+                            pass
+                    assets[row_dict["asset_id"]] = row_dict
 
-            results = []
-            for i, score in pairs:
-                if i >= len(asset_ids):
-                    continue
-                asset_id = asset_ids[i]
-                if asset_id not in filtered:
-                    continue
-                info = filtered[asset_id]
-                results.append({"asset_id": asset_id, "score": float(score), **info})
-                if len(results) >= top_k:
-                    break
+                conn.close()
 
-        st.success(f"✅ 找到 {len(results)} 条结果")
+                bbox = None
+                if filters.get("lat") is not None and filters.get("lon") is not None:
+                    bbox = bbox_filter(filters.get("lat"), filters.get("lon"), filters.get("radius_km", 5.0))
 
-        # 显示结果
-        for item in results:
-            with st.container():
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    file_path = item.get("file_path")
-                    if file_path and Path(file_path).exists():
-                        suffix = Path(file_path).suffix.lower()
-                        if suffix in {".mp4", ".mov", ".avi", ".mkv"}:
-                            st.video(str(file_path))
-                        else:
-                            st.image(str(file_path), width=200)
-                with col2:
-                    st.markdown(f"**相似度**: {item['score']:.4f}")
-                    st.write(f"**事件类型**: {item.get('event_type', 'N/A')}")
-                    st.write(f"**时间**: {item.get('last_alarm_time', 'N/A')}")
-                    st.write(f"**位置**: ({item.get('lat', 'N/A')}, {item.get('lon', 'N/A')})")
-                st.markdown("---")
+                filtered = apply_filters(
+                    assets, filters.get("event_type"), filters.get("start_time"), filters.get("end_time"), bbox
+                )
+
+                results = []
+                for i, score in pairs:
+                    if i >= len(asset_ids):
+                        continue
+                    asset_id = asset_ids[i]
+                    if asset_id not in filtered:
+                        continue
+                    info = filtered[asset_id]
+                    results.append({"asset_id": asset_id, "score": float(score), **info})
+                    if len(results) >= top_k:
+                        break
+
+                st.success(f"✅ 找到 {len(results)} 条结果")
+
+                # 显示结果（修复问题2：显示媒体文件）
+                for idx, item in enumerate(results):
+                    with st.container():
+                        st.markdown(f"### 结果 {idx + 1}")
+
+                        col1, col2 = st.columns([1, 2])
+
+                        with col1:
+                            st.markdown(f"**相似度**: {item['score']:.4f}")
+                            st.write(f"**事件类型**: {item.get('event_type', 'N/A')}")
+                            st.write(f"**时间**: {item.get('alarm_time', 'N/A')}")
+                            st.write(f"**位置**: ({item.get('lat', 'N/A')}, {item.get('lon', 'N/A')})")
+
+                        with col2:
+                            # 显示媒体文件
+                            video_url = item.get("video_url", "")
+                            img_urls_src = parse_media_urls(item.get("file_img_url_src", ""))
+                            img_urls_icon = parse_media_urls(item.get("file_img_url_icon", ""))
+
+                            # 优先显示原图，如果没有则显示框图
+                            img_urls = img_urls_src if img_urls_src else img_urls_icon
+
+                            if video_url or img_urls:
+                                display_media(video_url, img_urls)
+                            else:
+                                # 如果没有媒体URL，尝试使用file_path
+                                file_path = item.get("file_path")
+                                if file_path:
+                                    display_media("", [file_path])
+                                else:
+                                    st.info("无媒体文件")
+
+                        st.markdown("---")
+
+            except Exception as e:
+                st.error(f"检索失败: {e}")
+                import traceback
+                st.code(traceback.format_exc())
 
 
 def render_system_monitor():
@@ -482,7 +589,7 @@ def render_system_monitor():
             success_rate = trace_stats["success_count"] / trace_stats["total_queries"] * 100
         col4.metric("成功率", f"{success_rate:.1f}%")
 
-        st.metric("平均耗时", f"{trace_stats.get('avg_duration_ms', 0):.2f} ms")
+        st.metric("平均耗时", f"{trace_stats.get('avg_duration_ms', 0):.2f} 毫秒")
 
         # 按意图分组统计
         if trace_stats.get("by_intent"):
@@ -528,13 +635,6 @@ def render_system_monitor():
 # ============================================================================
 
 def main():
-    st.set_page_config(
-        page_title="多模态数据底座",
-        page_icon="🏗️",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-
     # 侧边栏
     with st.sidebar:
         st.title("🏗️ 多模态数据底座")
