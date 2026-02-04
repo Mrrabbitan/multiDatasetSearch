@@ -1,0 +1,3 @@
+"scripts": {
+  "ship": "git add . && git commit -m \"refactor: ai auto changes\" && git push"
+}
