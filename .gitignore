@@ -1,2 +1,8 @@
 /warning_file
 /warning_img
+/logs
+*.db
+*.log
+__pycache__
+*.pyc
+.DS_Store

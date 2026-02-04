@@ -137,7 +137,7 @@ class TraceManager:
         """
         self.db_path = db_path
         self.enable_file_log = enable_file_log
-        self.log_dir = Path(log_dir) if log_dir else Path("poc/logs/traces")
+        self.log_dir = Path(log_dir) if log_dir else Path("logs/traces")
 
         if self.db_path:
             self._init_db()
