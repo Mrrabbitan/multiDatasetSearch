@@ -1,0 +1,33 @@
+paths:
+  raw_images_dir: "warning_img"
+  raw_videos_dir: "warning_file"
+  structured_dir: "poc/data/structured"
+  db_path: "poc/data/metadata.db"
+  schema_path: "poc/schema/metadata.sql"
+  embeddings_dir: "poc/data/embeddings"
+  index_dir: "poc/data/index"
+
+ingest:
+  asset_id_strategy: "sha256"
+  structured_files:
+    - "alarms_warning.csv"
+  default_source: "offline_batch"
+  default_region: "unknown"
+
+search:
+  clip_model: "clip-ViT-B-32"
+  top_k: 10
+
+llm:
+  enabled: false
+  provider: "deepseek"
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+  api_key_env: "DEEPSEEK_API_KEY"
+  mode: "rule"  # options: "rule", "llm", "hybrid"
+  api_key: ""   # 可选: 测试环境可直接在此填写 DeepSeek 密钥
+
+train:
+  yolo_model: "yolov8n.pt"
+  epochs: 10
+  imgsz: 640

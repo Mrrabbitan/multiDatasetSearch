@@ -1,0 +1,45 @@
+·真警：judge_result = 1
+·车辆相关算法：根据warning_type_id字段判断：
+车辆闯入监控告警 1313100
+车辆闯红灯监控告警 1313105
+危险车辆识别告警 1313117
+车辆分类告警 1313125
+工程车辆识别检测告警 1313154
+车辆闯入检测告警 5050116
+·后端算法：warning_source=1
+·img_url_src和img_url_icon字段均不能为空
+·算法应用场景：app_scenarios=1
+"SELECT
+ t1.*
+,t2.alarm_area_id -- 告警区域id
+,t3.alarm_point_id -- 告警点Id
+,t3.percent_x -- 告警点X坐标百分比
+,t3.percent_y -- 告警点y坐标百分比
+,t4.preset_name -- 预置点名称
+,t5.algorithm_name -- 算法名称
+,'视联场景' app_scenarios -- 算法应用场景
+,t6.config_id -- 配置编号
+,c.type_name warning_type_name -- 告警类型名称
+,'AI告警' warning_source_name -- 告警来源名称
+from ods.ods_universal_sl_vm_warning_order_t_ma t1
+left join ods.ods_universal_sl_vm_warning_original_area_t_da t2 on t1.warning_order_id = t2.warning_order_id
+left join ods.ods_universal_sl_vm_warning_original_point_t_da t3 on t2.alarm_area_id = t3.alarm_area_id 
+left join ods.ods_universal_sl_vm_algorithm_info_t_da t5 on t1.algorithm_code = t5.algorithm_code 
+left join ods.ods_universal_sl_vm_video_preset_da t4 on t1.preset_id = t4.preset_id
+left join ods.ods_universal_sl_vm_algorithm_config_da t6 on t1.preset_id = t6.preset_id and t1.algorithm_code = t6.algorithm_code and t1.tenant_id = t6.tenant_id 
+and t1.industry_code = t6.industry_code and t1.device_code = t6.device_code and t1.channel_code = t6.channel_code 
+--告警类型映射表
+left join (
+    select type_name,type_value 
+    from dim.dim_sl_universal_sys_alarm_type_da dsusatd 
+    where statistical_date ='20260122'
+    group by type_name,type_value 
+) c on t1.warning_type_id = c.type_value 
+where t1.judge_result = 1
+and t1.warning_type_id in ('1313100','1313105','1313117','1313125','1313154','5050116')
+and t1.warning_source = 1
+and t5.app_scenarios = '1' -- 视联场景
+and t1.file_img_url_src is not NULL
+and t1.file_img_url_icon is not null
+order by t1.alarm_time desc
+;"
