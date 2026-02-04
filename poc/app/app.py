@@ -30,6 +30,18 @@ from poc.search.query import (
 )
 
 
+@st.cache_resource
+def get_cached_model(model_name: str):
+    """缓存CLIP模型，避免重复加载"""
+    return load_model(model_name)
+
+
+@st.cache_resource
+def get_cached_index(index_dir: Path):
+    """缓存向量索引，避免重复加载"""
+    return load_index(index_dir)
+
+
 def load_config() -> Dict:
     return load_yaml("poc/config/poc.yaml")
 
@@ -48,52 +60,113 @@ def db_stats(db_path: Path) -> Dict[str, int]:
 
 
 def run_search(config: Dict, text: str, filters: Dict, top_k: int) -> List[Dict]:
+    """
+    混合检索策略：先SQL预过滤，再向量检索排序
+    优化点：
+    1. 使用缓存的模型和索引，避免重复加载
+    2. 先用SQL过滤出符合条件的asset_id集合（Pre-filtering）
+    3. 再在这个子集上做向量检索和排序
+    """
     index_dir = resolve_path(config.get("paths", {}).get("index_dir", "poc/data/index"))
     db_path = resolve_path(config.get("paths", {}).get("db_path", "poc/data/metadata.db"))
     model_name = config.get("search", {}).get("clip_model", "clip-ViT-B-32")
 
-    meta, index_obj = load_index(index_dir)
-    model = load_model(model_name)
+    # 使用缓存的模型和索引（性能优化1）
+    meta, index_obj = get_cached_index(index_dir)
+    model = get_cached_model(model_name)
+
+    # 编码查询向量
     query_vec = encode_query(model, text, None)
 
-    if meta.get("backend") == "faiss":
-        import faiss  # type: ignore
-
-        scores, idx = index_obj.search(query_vec[None, :], max(top_k * 3, top_k))
-        pairs = list(zip(idx[0].tolist(), scores[0].tolist()))
-    else:
-        import numpy as np  # type: ignore
-
-        vectors = index_obj
-        scores = np.dot(vectors, query_vec)
-        idx = np.argsort(-scores)[: max(top_k * 3, top_k)]
-        pairs = list(zip(idx.tolist(), scores[idx].tolist()))
-
-    asset_ids = meta.get("asset_ids", [])
-    candidate_ids = [asset_ids[i] for i, _ in pairs if i < len(asset_ids)]
-
+    # === 混合检索策略优化：Pre-filtering ===
+    # 第一步：先用SQL过滤出符合条件的asset_id集合
     conn = connect_db(db_path)
-    assets = fetch_asset_context(conn, candidate_ids)
-    conn.close()
 
+    # 构建SQL预过滤条件
+    where_clauses = []
+    params = []
+
+    if filters.get("event_type"):
+        where_clauses.append("e.event_type = ?")
+        params.append(filters["event_type"])
+
+    if filters.get("start_time"):
+        where_clauses.append("e.alarm_time >= ?")
+        params.append(filters["start_time"])
+
+    if filters.get("end_time"):
+        where_clauses.append("e.alarm_time <= ?")
+        params.append(filters["end_time"])
+
+    # 地理位置过滤
     bbox = None
     if filters.get("lat") is not None and filters.get("lon") is not None:
         bbox = bbox_filter(filters.get("lat"), filters.get("lon"), filters.get("radius_km", 5.0))
-    filtered = apply_filters(
-        assets, filters.get("event_type"), filters.get("start_time"), filters.get("end_time"), bbox
-    )
+        if bbox:
+            where_clauses.append("a.lat BETWEEN ? AND ?")
+            where_clauses.append("a.lon BETWEEN ? AND ?")
+            params.extend([bbox[0], bbox[1], bbox[2], bbox[3]])
 
+    # 构建预过滤SQL
+    where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+    prefilter_sql = f"""
+        SELECT DISTINCT a.asset_id
+        FROM assets a
+        LEFT JOIN events e ON a.asset_id = e.asset_id
+        {where_sql}
+    """
+
+    prefiltered_rows = conn.execute(prefilter_sql, params).fetchall()
+    prefiltered_asset_ids = {row["asset_id"] for row in prefiltered_rows}
+
+    # 如果没有符合条件的数据，直接返回空
+    if not prefiltered_asset_ids:
+        conn.close()
+        return []
+
+    # 第二步：在预过滤的asset_id集合上做向量检索
+    asset_ids = meta.get("asset_ids", [])
+
+    # 找出预过滤集合在向量索引中的位置
+    valid_indices = [i for i, aid in enumerate(asset_ids) if aid in prefiltered_asset_ids]
+
+    if not valid_indices:
+        conn.close()
+        return []
+
+    # 向量检索（只在预过滤的子集上计算相似度）
+    if meta.get("backend") == "faiss":
+        import faiss  # type: ignore
+        # FAISS需要检索全量，然后过滤
+        scores, idx = index_obj.search(query_vec[None, :], len(asset_ids))
+        pairs = [(i, s) for i, s in zip(idx[0].tolist(), scores[0].tolist()) if i in valid_indices]
+        pairs = sorted(pairs, key=lambda x: x[1], reverse=True)[:top_k]
+    else:
+        import numpy as np  # type: ignore
+        vectors = index_obj
+        # 只计算预过滤子集的相似度（性能优化）
+        subset_vectors = vectors[valid_indices]
+        scores = np.dot(subset_vectors, query_vec)
+        sorted_idx = np.argsort(-scores)[:top_k]
+        pairs = [(valid_indices[i], scores[i]) for i in sorted_idx]
+
+    # 第三步：获取最终结果的详细信息
+    candidate_ids = [asset_ids[i] for i, _ in pairs if i < len(asset_ids)]
+    assets = fetch_asset_context(conn, candidate_ids)
+    conn.close()
+
+    # 构建最终结果
     results = []
     for i, score in pairs:
         if i >= len(asset_ids):
             continue
         asset_id = asset_ids[i]
-        if asset_id not in filtered:
+        if asset_id not in assets:
             continue
-        info = filtered[asset_id]
+        info = assets[asset_id]
         results.append({"asset_id": asset_id, "score": float(score), **info})
-        if len(results) >= top_k:
-            break
+
     return results
 
 
