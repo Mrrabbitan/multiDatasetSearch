@@ -32,12 +32,36 @@ def load_index(index_dir: Path):
     return meta, vectors
 
 
-def load_model(model_name: str):
+def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Optional[str] = None):
+    """
+    加载CLIP模型，支持设置缓存目录和镜像源
+
+    Args:
+        model_name: 模型名称
+        cache_dir: 模型缓存目录
+        hf_mirror: HuggingFace镜像源URL
+    """
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
     except Exception as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("sentence-transformers not installed.") from exc
-    return SentenceTransformer(model_name)
+
+    # 设置HuggingFace镜像源（国内加速）
+    if hf_mirror:
+        import os
+        os.environ['HF_ENDPOINT'] = hf_mirror
+        print(f"使用HuggingFace镜像源: {hf_mirror}")
+
+    # 加载模型
+    if cache_dir:
+        from pathlib import Path
+        cache_path = Path(cache_dir)
+        cache_path.mkdir(parents=True, exist_ok=True)
+        model = SentenceTransformer(model_name, cache_folder=str(cache_path))
+    else:
+        model = SentenceTransformer(model_name)
+
+    return model
 
 
 def encode_query(model, text: Optional[str], image_path: Optional[Path]):
@@ -122,7 +146,10 @@ def main() -> None:
         raise RuntimeError("numpy is required. Please pip install numpy.")
 
     config = load_yaml(args.config)
-    model_name = config.get("search", {}).get("clip_model", "clip-ViT-B-32")
+    search_cfg = config.get("search", {})
+    model_name = search_cfg.get("clip_model", "clip-ViT-B-32")
+    cache_dir = search_cfg.get("model_cache_dir")
+    hf_mirror = search_cfg.get("hf_mirror")
     db_path = resolve_path(config.get("paths", {}).get("db_path", "poc/data/metadata.db"))
     index_dir = resolve_path(args.index_dir)
 
@@ -136,7 +163,7 @@ def main() -> None:
         query_vec = np.random.rand(int(dims)).astype("float32")
         query_vec /= max(1e-12, float(np.linalg.norm(query_vec)))
     else:
-        model = load_model(model_name)
+        model = load_model(model_name, cache_dir=cache_dir, hf_mirror=hf_mirror)
         query_vec = encode_query(
             model, args.text, resolve_path(args.image) if args.image else None
         ).astype("float32")

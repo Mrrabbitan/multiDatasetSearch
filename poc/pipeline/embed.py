@@ -28,14 +28,39 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def load_model(model_name: str):
+def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Optional[str] = None):
+    """
+    加载CLIP模型，支持设置缓存目录和镜像源
+
+    Args:
+        model_name: 模型名称
+        cache_dir: 模型缓存目录
+        hf_mirror: HuggingFace镜像源URL
+    """
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
     except Exception as exc:  # pragma: no cover - optional dependency
         raise RuntimeError(
             "sentence-transformers not installed. Please pip install sentence-transformers."
         ) from exc
-    return SentenceTransformer(model_name)
+
+    # 设置HuggingFace镜像源（国内加速）
+    if hf_mirror:
+        import os
+        os.environ['HF_ENDPOINT'] = hf_mirror
+        print(f"使用HuggingFace镜像源: {hf_mirror}")
+
+    # 加载模型
+    print(f"正在加载模型: {model_name}")
+    if cache_dir:
+        cache_path = Path(cache_dir)
+        cache_path.mkdir(parents=True, exist_ok=True)
+        model = SentenceTransformer(model_name, cache_folder=str(cache_path))
+    else:
+        model = SentenceTransformer(model_name)
+
+    print(f"模型加载成功！维度: {model.get_sentence_embedding_dimension()}")
+    return model
 
 
 def embed_images(model, images: List[Path]) -> List[tuple]:
@@ -63,6 +88,8 @@ def main() -> None:
     paths_cfg = config.get("paths", {})
     search_cfg = config.get("search", {})
     model_name = search_cfg.get("clip_model", "clip-ViT-B-32")
+    cache_dir = search_cfg.get("model_cache_dir")
+    hf_mirror = search_cfg.get("hf_mirror")
 
     raw_images_dir = resolve_path(paths_cfg.get("raw_images_dir", "poc/data/raw/images"))
     db_path = resolve_path(paths_cfg.get("db_path", "poc/data/metadata.db"))
@@ -74,7 +101,7 @@ def main() -> None:
         embeddings = [(path, np.random.rand(512).astype("float32")) for path in images]
         model_name = "mock"
     else:
-        model = load_model(model_name)
+        model = load_model(model_name, cache_dir=cache_dir, hf_mirror=hf_mirror)
         embeddings = embed_images(model, images)
 
     conn = connect_db(db_path)

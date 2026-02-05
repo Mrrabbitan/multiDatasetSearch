@@ -46,9 +46,22 @@ st.set_page_config(
 # ============================================================================
 
 @st.cache_resource
-def get_cached_model(model_name: str):
+def get_cached_model(model_name: str, cache_dir: str = None, hf_mirror: str = None):
     """缓存CLIP模型，避免重复加载"""
-    return load_model(model_name)
+    # 设置HuggingFace镜像源（国内加速）
+    if hf_mirror:
+        import os
+        os.environ['HF_ENDPOINT'] = hf_mirror
+        st.info(f"🌐 使用HuggingFace镜像源: {hf_mirror}")
+
+    st.info(f"🔄 正在加载模型: {model_name}，请稍候...")
+    model = load_model(model_name)
+
+    # 显示模型信息
+    dims = model.get_sentence_embedding_dimension()
+    st.success(f"✅ 模型加载成功！维度: {dims}")
+
+    return model
 
 
 @st.cache_resource
@@ -607,11 +620,14 @@ def render_multimodal_search():
         with st.spinner("🔍 检索中..."):
             # 使用优化后的检索逻辑
             index_dir = resolve_path(config.get("paths", {}).get("index_dir", "poc/data/index"))
-            model_name = config.get("search", {}).get("clip_model", "clip-ViT-B-32")
+            search_cfg = config.get("search", {})
+            model_name = search_cfg.get("clip_model", "clip-ViT-B-32")
+            cache_dir = search_cfg.get("model_cache_dir")
+            hf_mirror = search_cfg.get("hf_mirror")
 
             try:
                 meta, index_obj = get_cached_index(index_dir)
-                model = get_cached_model(model_name)
+                model = get_cached_model(model_name, cache_dir=cache_dir, hf_mirror=hf_mirror)
 
                 # 根据检索模式编码查询
                 if search_mode == "📝 文本检索":
