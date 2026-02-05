@@ -64,7 +64,19 @@ def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Opti
     else:
         model = SentenceTransformer(model_name)
 
-    print(f"模型加载成功！维度: {model.get_sentence_embedding_dimension()}")
+    # 获取向量维度（通过实际编码获取）
+    try:
+        dims = model.get_sentence_embedding_dimension()
+        if dims is None:
+            # 如果返回 None，通过编码一个测试样本获取维度
+            test_vec = model.encode("test", convert_to_numpy=True)
+            dims = test_vec.shape[0]
+    except:
+        # 备用方案：编码测试样本
+        test_vec = model.encode("test", convert_to_numpy=True)
+        dims = test_vec.shape[0]
+
+    print(f"模型加载成功！维度: {dims}")
     return model
 
 
