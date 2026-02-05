@@ -417,8 +417,85 @@ def render_intelligent_qa():
             answer_data = result["answer"].get("value")
             if isinstance(answer_data, list) and len(answer_data) > 0:
                 # 列表结果，显示为表格
-                df = pd.DataFrame(answer_data)
+                # 检查数据格式：如果是字典列表，直接转换；如果是元组列表，需要添加列名
+                if isinstance(answer_data[0], dict):
+                    df = pd.DataFrame(answer_data)
+                elif isinstance(answer_data[0], (tuple, list)):
+                    # 从 SQL 参数中提取列名
+                    sql = result.get("sql", "")
+                    # 尝试从 SELECT 语句中提取列名
+                    import re
+                    select_match = re.search(r'SELECT\s+(.*?)\s+FROM', sql, re.IGNORECASE | re.DOTALL)
+                    if select_match:
+                        columns_str = select_match.group(1)
+                        # 解析列名（处理 AS 别名）
+                        columns = []
+                        for col in columns_str.split(','):
+                            col = col.strip()
+                            # 处理 AS 别名
+                            if ' AS ' in col.upper():
+                                col = col.split(' AS ')[-1].strip()
+                            # 处理表名.列名格式
+                            elif '.' in col:
+                                col = col.split('.')[-1].strip()
+                            columns.append(col)
+
+                        df = pd.DataFrame(answer_data, columns=columns)
+                    else:
+                        df = pd.DataFrame(answer_data)
+                else:
+                    df = pd.DataFrame(answer_data)
+
+                # 美化列名（将下划线替换为空格，首字母大写）
+                df.columns = [col.replace('_', ' ').title() if isinstance(col, str) else col for col in df.columns]
+
                 st.dataframe(df, use_container_width=True)
+
+                # 如果结果包含图片路径，提供查看选项
+                if any('path' in str(col).lower() or 'file' in str(col).lower() for col in df.columns):
+                    st.info("💡 提示：结果中包含文件路径，您可以在下方查看图片")
+
+                    # 让用户选择查看哪一行的图片
+                    if len(df) > 0:
+                        with st.expander("🖼️ 查看图片", expanded=False):
+                            row_idx = st.selectbox("选择要查看的记录", range(len(df)), format_func=lambda x: f"第 {x+1} 行")
+
+                            if row_idx is not None:
+                                row_data = answer_data[row_idx]
+
+                                # 查找图片路径列
+                                img_path = None
+                                if isinstance(row_data, dict):
+                                    for key, value in row_data.items():
+                                        if value and ('path' in str(key).lower() or 'file' in str(key).lower()):
+                                            if str(value).endswith(('.jpg', '.jpeg', '.png', '.bmp')):
+                                                img_path = value
+                                                break
+                                elif isinstance(row_data, (tuple, list)) and len(row_data) > 3:
+                                    # 假设第4列是文件路径
+                                    img_path = row_data[3] if len(row_data) > 3 else None
+
+                                if img_path:
+                                    # 尝试显示图片
+                                    possible_paths = [
+                                        Path(img_path),
+                                        Path("warning_img") / Path(img_path).name,
+                                        ROOT / "warning_img" / Path(img_path).name,
+                                        ROOT / img_path
+                                    ]
+
+                                    img_found = False
+                                    for p in possible_paths:
+                                        if p.exists():
+                                            st.image(str(p), use_container_width=True)
+                                            img_found = True
+                                            break
+
+                                    if not img_found:
+                                        st.warning(f"图片文件不存在: {img_path}")
+                                else:
+                                    st.info("该记录没有图片路径")
+
             elif isinstance(answer_data, int):
                 # 统计结果
                 st.metric("统计结果", answer_data)
