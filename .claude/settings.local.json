@@ -4,7 +4,8 @@
       "Bash(sqlite3:*)",
       "Bash(python:*)",
       "Bash(ls:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(dos2unix:*)"
     ]
   }
 }
