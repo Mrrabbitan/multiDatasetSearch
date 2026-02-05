@@ -1,13 +1,13 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # 重新入库脚本 - 清理并重新生成所有数据和索引
 # 使用方法: conda activate multimodal && bash 重新入库.sh
 
-set -euo pipefail
+set -e
 
 # 检查是否在正确的环境中
 if [ -n "${CONDA_DEFAULT_ENV:-}" ] && [ "$CONDA_DEFAULT_ENV" != "multimodal" ]; then
     echo "✗ 错误: 当前在 $CONDA_DEFAULT_ENV 环境，请切换到 multimodal 环境"
-    echo "运行: conda activate multimodal && bash $0"
+    echo "运行: conda activate multimodal && bash 重新入库.sh"
     exit 1
 fi
 
@@ -17,14 +17,14 @@ if [ -z "${CONDA_DEFAULT_ENV:-}" ]; then
 
     # 查找并初始化 conda
     if [ -f "/root/miniconda3/etc/profile.d/conda.sh" ]; then
-        source "/root/miniconda3/etc/profile.d/conda.sh"
+        . "/root/miniconda3/etc/profile.d/conda.sh"
     elif [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
-        source "$HOME/miniconda3/etc/profile.d/conda.sh"
+        . "$HOME/miniconda3/etc/profile.d/conda.sh"
     elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
-        source "$HOME/anaconda3/etc/profile.d/conda.sh"
+        . "$HOME/anaconda3/etc/profile.d/conda.sh"
     else
         echo "✗ 错误: 找不到 conda，请手动激活环境"
-        echo "运行: conda activate multimodal && bash $0"
+        echo "运行: conda activate multimodal && bash 重新入库.sh"
         exit 1
     fi
 
@@ -34,7 +34,7 @@ if [ -z "${CONDA_DEFAULT_ENV:-}" ]; then
     # 再次检查
     if [ "$CONDA_DEFAULT_ENV" != "multimodal" ]; then
         echo "✗ 错误: 自动激活失败，请手动激活环境"
-        echo "运行: conda activate multimodal && bash $0"
+        echo "运行: conda activate multimodal && bash 重新入库.sh"
         exit 1
     fi
 fi
@@ -44,7 +44,7 @@ echo "✓ Python 路径: $(which python)"
 echo ""
 
 # 获取脚本所在目录
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 echo "=== 开始重新入库 ==="
