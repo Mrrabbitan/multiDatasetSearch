@@ -3,7 +3,8 @@
     "allow": [
       "Bash(sqlite3:*)",
       "Bash(python:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "WebSearch"
     ]
   }
 }
