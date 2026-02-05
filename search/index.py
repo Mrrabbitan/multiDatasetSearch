@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import List, Tuple
 
-from poc.pipeline.utils import connect_db, load_yaml, resolve_path
+from pipeline.utils import connect_db, load_yaml, resolve_path
 
 try:
     import numpy as np  # type: ignore
@@ -33,8 +33,8 @@ def build_faiss_index(vectors: "np.ndarray"):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="POC vector index builder")
-    parser.add_argument("--config", default="poc/config/poc.yaml")
-    parser.add_argument("--output-dir", default="poc/data/index")
+    parser.add_argument("--config", default="config/poc.yaml")
+    parser.add_argument("--output-dir", default="data/index")
     args = parser.parse_args()
 
     if np is None:
@@ -42,7 +42,7 @@ def main() -> None:
 
     config = load_yaml(args.config)
     paths_cfg = config.get("paths", {})
-    db_path = resolve_path(paths_cfg.get("db_path", "poc/data/metadata.db"))
+    db_path = resolve_path(paths_cfg.get("db_path", "data/metadata.db"))
     output_dir = resolve_path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -51,7 +51,7 @@ def main() -> None:
     conn.close()
 
     if not asset_ids:
-        raise RuntimeError("no embeddings found, run poc.pipeline.embed first.")
+        raise RuntimeError("no embeddings found, run pipeline.embed first.")
 
     vectors = []
     for path in vec_paths:

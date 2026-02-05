@@ -3,8 +3,8 @@ import json
 import os
 from typing import Any, Dict, List
 
-from poc.pipeline.utils import connect_db, load_yaml, resolve_path
-from poc.qa.nl2sql import parse_question
+from pipeline.utils import connect_db, load_yaml, resolve_path
+from qa.nl2sql import parse_question
 
 
 def run_sql(db_path, sql: str, params: List) -> List[Dict[str, Any]]:
@@ -16,7 +16,7 @@ def run_sql(db_path, sql: str, params: List) -> List[Dict[str, Any]]:
 
 def run_retrieval(config, question: str, filters: Dict) -> List[Dict[str, Any]]:
     try:
-        from poc.search.query import (
+        from search.query import (
             apply_filters,
             bbox_filter,
             encode_query,
@@ -94,7 +94,7 @@ def run_retrieval(config, question: str, filters: Dict) -> List[Dict[str, Any]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="POC intelligent QA")
-    parser.add_argument("--config", default="poc/config/poc.yaml")
+    parser.add_argument("--config", default="config/poc.yaml")
     parser.add_argument("--question", required=True)
     parser.add_argument("--with-evidence", action="store_true")
     args = parser.parse_args()
