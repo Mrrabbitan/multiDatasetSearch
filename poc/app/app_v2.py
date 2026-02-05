@@ -128,19 +128,31 @@ def display_media(video_url: str, img_urls: List[str]):
         possible_paths = [
             Path(video_url),
             Path("warning_file") / Path(video_url).name,
-            Path("warning_file") / video_url
+            Path("warning_file") / video_url,
+            ROOT / video_url,
+            ROOT / "warning_file" / Path(video_url).name
         ]
 
         video_found = False
         for video_path in possible_paths:
             if video_path.exists():
-                st.video(str(video_path))
-                video_found = True
-                break
+                try:
+                    # 读取视频文件并显示
+                    with open(video_path, 'rb') as video_file:
+                        video_bytes = video_file.read()
+                        st.video(video_bytes)
+                    video_found = True
+                    break
+                except Exception as e:
+                    st.warning(f"视频加载失败: {e}")
+                    continue
 
         if not video_found:
             if video_url.startswith('http'):
-                st.video(video_url)
+                try:
+                    st.video(video_url)
+                except Exception as e:
+                    st.error(f"视频播放失败: {e}")
             else:
                 st.info(f"视频文件不存在: {video_url}")
 
@@ -159,13 +171,13 @@ def display_media(video_url: str, img_urls: List[str]):
                 img_found = False
                 for img_path in possible_paths:
                     if img_path.exists():
-                        st.image(str(img_path), use_column_width=True)
+                        st.image(str(img_path), use_container_width=True)
                         img_found = True
                         break
 
                 if not img_found:
                     if img_url.startswith('http'):
-                        st.image(img_url, use_column_width=True)
+                        st.image(img_url, use_container_width=True)
                     else:
                         st.caption(f"图片不存在: {Path(img_url).name}")
 

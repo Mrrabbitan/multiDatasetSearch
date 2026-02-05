@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(sqlite3:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(ls:*)"
     ]
   }
 }
