@@ -1,5 +1,4 @@
 import argparse
-import uuid
 from pathlib import Path
 from typing import List, Optional
 
@@ -14,6 +13,11 @@ try:
     from PIL import Image  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     Image = None
+
+try:
+    import lancedb  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    lancedb = None
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
@@ -48,6 +52,7 @@ def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Opti
     if hf_mirror:
         import os
         os.environ['HF_ENDPOINT'] = hf_mirror
+        os.environ['HUGGINGFACE_HUB_CACHE'] = cache_dir if cache_dir else os.path.expanduser('~/.cache/huggingface')
         print(f"使用HuggingFace镜像源: {hf_mirror}")
 
     # 加载模型
@@ -67,7 +72,9 @@ def embed_images(model, images: List[Path]) -> List[tuple]:
     if Image is None or np is None:
         raise RuntimeError("Pillow and numpy required for embeddings.")
     outputs = []
-    for path in images:
+    for i, path in enumerate(images):
+        if (i + 1) % 100 == 0:
+            print(f"  处理进度: {i + 1}/{len(images)}")
         image = Image.open(path).convert("RGB")
         vec = model.encode(image, convert_to_numpy=True, normalize_embeddings=True)
         outputs.append((path, vec))
@@ -75,14 +82,16 @@ def embed_images(model, images: List[Path]) -> List[tuple]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="POC image embedding")
+    parser = argparse.ArgumentParser(description="POC image embedding with LanceDB")
     parser.add_argument("--config", default="poc/config/poc.yaml")
-    parser.add_argument("--output-dir", default="poc/data/embeddings")
     parser.add_argument("--mock", action="store_true")
     args = parser.parse_args()
 
     if np is None:
         raise RuntimeError("numpy is required. Please pip install numpy.")
+
+    if lancedb is None:
+        raise RuntimeError("lancedb is required. Please pip install lancedb.")
 
     config = load_yaml(args.config)
     paths_cfg = config.get("paths", {})
@@ -93,44 +102,77 @@ def main() -> None:
 
     raw_images_dir = resolve_path(paths_cfg.get("raw_images_dir", "poc/data/raw/images"))
     db_path = resolve_path(paths_cfg.get("db_path", "poc/data/metadata.db"))
-    output_dir = resolve_path(args.output_dir)
-    ensure_dir(output_dir)
+    lancedb_dir = resolve_path(paths_cfg.get("lancedb_dir", "poc/data/lancedb"))
+    ensure_dir(lancedb_dir)
 
+    # 发现图片
     images = discover_images(raw_images_dir)
+    print(f"发现 {len(images)} 张图片")
+
+    # 生成向量
     if args.mock:
         embeddings = [(path, np.random.rand(512).astype("float32")) for path in images]
         model_name = "mock"
+        dims = 512
     else:
         model = load_model(model_name, cache_dir=cache_dir, hf_mirror=hf_mirror)
+        dims = model.get_sentence_embedding_dimension()
+        print(f"开始生成向量嵌入...")
         embeddings = embed_images(model, images)
 
+    # 从 SQLite 获取资产元数据
     conn = connect_db(db_path)
-    by_path = {
-        row["file_path"]: row["asset_id"]
-        for row in conn.execute("SELECT asset_id, file_path FROM assets").fetchall()
-    }
-
-    rows = []
-    for path, vec in embeddings:
-        asset_id = by_path.get(str(path))
-        if not asset_id:
-            continue
-        vector_path = output_dir / f"{asset_id}.npy"
-        np.save(vector_path, vec.astype("float32"))
-        rows.append((uuid.uuid4().hex, asset_id, model_name, str(vector_path), int(vec.shape[0])))
-
-    conn.executemany(
-        """
-        INSERT OR REPLACE INTO embeddings (
-            embedding_id, asset_id, model_name, vector_path, dims
-        ) VALUES (?, ?, ?, ?, ?)
-        """,
-        rows,
-    )
-    conn.commit()
+    assets_data = {}
+    for row in conn.execute("""
+        SELECT a.asset_id, a.file_path, a.file_name, a.captured_at, a.lat, a.lon,
+               e.event_type, e.alarm_time, e.alarm_level
+        FROM assets a
+        LEFT JOIN events e ON a.asset_id = e.asset_id
+    """).fetchall():
+        assets_data[row["file_path"]] = dict(row)
     conn.close()
 
-    print(f"embedded: {len(rows)}")
+    # 准备 LanceDB 数据
+    lance_data = []
+    for path, vec in embeddings:
+        asset_info = assets_data.get(str(path))
+        if not asset_info:
+            continue
+
+        lance_data.append({
+            "asset_id": asset_info["asset_id"],
+            "file_path": str(path),
+            "file_name": asset_info["file_name"],
+            "captured_at": asset_info["captured_at"] or "",
+            "lat": float(asset_info["lat"]) if asset_info["lat"] is not None else 0.0,
+            "lon": float(asset_info["lon"]) if asset_info["lon"] is not None else 0.0,
+            "event_type": asset_info["event_type"] or "",
+            "alarm_time": asset_info["alarm_time"] or "",
+            "alarm_level": asset_info["alarm_level"] or "",
+            "model_name": model_name,
+            "vector": vec.tolist(),  # LanceDB 需要 list 格式
+        })
+
+    # 写入 LanceDB
+    print(f"写入 LanceDB: {len(lance_data)} 条记录")
+    db = lancedb.connect(str(lancedb_dir))
+
+    # 如果表已存在，删除重建（全量更新模式）
+    table_name = "embeddings"
+    if table_name in db.table_names():
+        db.drop_table(table_name)
+
+    # 创建表并写入数据
+    table = db.create_table(table_name, data=lance_data)
+
+    # 创建向量索引（提升查询性能）
+    print("创建向量索引...")
+    table.create_index(metric="cosine", num_partitions=256, num_sub_vectors=96)
+
+    print(f"✓ 完成！共处理 {len(lance_data)} 条记录")
+    print(f"  - 模型: {model_name}")
+    print(f"  - 维度: {dims}")
+    print(f"  - 存储路径: {lancedb_dir}")
 
 
 if __name__ == "__main__":

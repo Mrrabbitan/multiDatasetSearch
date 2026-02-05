@@ -2,9 +2,9 @@ import argparse
 import json
 import math
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
-from poc.pipeline.utils import connect_db, load_yaml, resolve_path
+from poc.pipeline.utils import load_yaml, resolve_path
 
 try:
     import numpy as np  # type: ignore
@@ -12,24 +12,14 @@ except Exception:  # pragma: no cover - optional dependency
     np = None
 
 try:
-    import faiss  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    faiss = None
-
-try:
     from PIL import Image  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     Image = None
 
-def load_index(index_dir: Path):
-    meta_path = index_dir / "index_meta.json"
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    backend = meta.get("backend")
-    if backend == "faiss" and faiss:
-        index = faiss.read_index(str(index_dir / "index.faiss"))
-        return meta, index
-    vectors = np.load(index_dir / "index.npy")
-    return meta, vectors
+try:
+    import lancedb  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    lancedb = None
 
 
 def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Optional[str] = None):
@@ -79,59 +69,45 @@ def encode_query(model, text: Optional[str], image_path: Optional[Path]):
     raise RuntimeError("Specify text or image for query.")
 
 
-def bbox_filter(lat: Optional[float], lon: Optional[float], radius_km: float):
-    if lat is None or lon is None:
-        return None
-    lat_delta = radius_km / 111.0
-    lon_delta = radius_km / (111.0 * max(0.1, math.cos(math.radians(lat))))
-    return (lat - lat_delta, lat + lat_delta, lon - lon_delta, lon + lon_delta)
+def build_lance_filter(
+    event_type: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    radius_km: float = 5.0,
+) -> Optional[str]:
+    """
+    构建 LanceDB 过滤条件（SQL WHERE 语法）
+    """
+    conditions = []
 
+    if event_type:
+        conditions.append(f"event_type = '{event_type}'")
 
-def fetch_asset_context(conn, asset_ids: List[str]) -> Dict[str, dict]:
-    if not asset_ids:
-        return {}
-    placeholders = ",".join(["?"] * len(asset_ids))
-    rows = conn.execute(
-        f"""
-        SELECT a.asset_id, a.file_path, a.file_name, a.captured_at, a.lat, a.lon,
-               (SELECT e.event_type FROM events e WHERE e.asset_id = a.asset_id ORDER BY e.alarm_time DESC LIMIT 1) AS event_type,
-               (SELECT e.alarm_time FROM events e WHERE e.asset_id = a.asset_id ORDER BY e.alarm_time DESC LIMIT 1) AS last_alarm_time
-        FROM assets a
-        WHERE a.asset_id IN ({placeholders})
-        """,
-        asset_ids,
-    ).fetchall()
-    return {row["asset_id"]: dict(row) for row in rows}
+    if start_time:
+        # 使用 alarm_time 或 captured_at
+        conditions.append(f"(alarm_time >= '{start_time}' OR (alarm_time = '' AND captured_at >= '{start_time}'))")
 
+    if end_time:
+        conditions.append(f"(alarm_time <= '{end_time}' OR (alarm_time = '' AND captured_at <= '{end_time}'))")
 
-def apply_filters(
-    assets: Dict[str, dict],
-    event_type: Optional[str],
-    start_time: Optional[str],
-    end_time: Optional[str],
-    bbox: Optional[Tuple[float, float, float, float]],
-):
-    results = {}
-    for asset_id, info in assets.items():
-        if event_type and info.get("event_type") != event_type:
-            continue
-        # Use latest alarm_time associated with this asset for time filtering.
-        event_time = info.get("last_alarm_time") or info.get("captured_at")
-        if start_time and event_time and event_time < start_time:
-            continue
-        if end_time and event_time and event_time > end_time:
-            continue
-        if bbox and info.get("lat") is not None and info.get("lon") is not None:
-            if not (bbox[0] <= info["lat"] <= bbox[1] and bbox[2] <= info["lon"] <= bbox[3]):
-                continue
-        results[asset_id] = info
-    return results
+    if lat is not None and lon is not None:
+        # 计算边界框
+        lat_delta = radius_km / 111.0
+        lon_delta = radius_km / (111.0 * max(0.1, math.cos(math.radians(lat))))
+        min_lat = lat - lat_delta
+        max_lat = lat + lat_delta
+        min_lon = lon - lon_delta
+        max_lon = lon + lon_delta
+        conditions.append(f"lat >= {min_lat} AND lat <= {max_lat} AND lon >= {min_lon} AND lon <= {max_lon}")
+
+    return " AND ".join(conditions) if conditions else None
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="POC multimodal search query")
+    parser = argparse.ArgumentParser(description="POC multimodal search query with LanceDB")
     parser.add_argument("--config", default="poc/config/poc.yaml")
-    parser.add_argument("--index-dir", default="poc/data/index")
     parser.add_argument("--text")
     parser.add_argument("--image")
     parser.add_argument("--top-k", type=int, default=10)
@@ -147,22 +123,27 @@ def main() -> None:
     if np is None:
         raise RuntimeError("numpy is required. Please pip install numpy.")
 
+    if lancedb is None:
+        raise RuntimeError("lancedb is required. Please pip install lancedb.")
+
     config = load_yaml(args.config)
+    paths_cfg = config.get("paths", {})
     search_cfg = config.get("search", {})
     model_name = search_cfg.get("clip_model", "clip-ViT-B-32")
     cache_dir = search_cfg.get("model_cache_dir")
     hf_mirror = search_cfg.get("hf_mirror")
-    db_path = resolve_path(config.get("paths", {}).get("db_path", "poc/data/metadata.db"))
-    index_dir = resolve_path(args.index_dir)
+    lancedb_dir = resolve_path(paths_cfg.get("lancedb_dir", "poc/data/lancedb"))
 
-    meta, index_obj = load_index(index_dir)
+    # 连接 LanceDB
+    db = lancedb.connect(str(lancedb_dir))
+    table = db.open_table("embeddings")
+
+    # 生成查询向量
     if args.mock:
-        dims = meta.get("dims")
-        if not dims and hasattr(index_obj, "shape"):
-            dims = index_obj.shape[1]
-        if not dims:
-            raise RuntimeError("cannot infer embedding dims for mock query.")
-        query_vec = np.random.rand(int(dims)).astype("float32")
+        # 获取表的向量维度
+        sample = table.to_pandas().head(1)
+        dims = len(sample['vector'].iloc[0])
+        query_vec = np.random.rand(dims).astype("float32")
         query_vec /= max(1e-12, float(np.linalg.norm(query_vec)))
     else:
         model = load_model(model_name, cache_dir=cache_dir, hf_mirror=hf_mirror)
@@ -170,36 +151,38 @@ def main() -> None:
             model, args.text, resolve_path(args.image) if args.image else None
         ).astype("float32")
 
-    if meta.get("backend") == "faiss" and faiss:
-        scores, idx = index_obj.search(query_vec[None, :], max(args.top_k * 3, args.top_k))
-        pairs = list(zip(idx[0].tolist(), scores[0].tolist()))
-    else:
-        vectors = index_obj
-        scores = np.dot(vectors, query_vec)
-        idx = np.argsort(-scores)[: max(args.top_k * 3, args.top_k)]
-        pairs = list(zip(idx.tolist(), scores[idx].tolist()))
+    # 构建过滤条件
+    filter_str = build_lance_filter(
+        event_type=args.event_type,
+        start_time=args.start_time,
+        end_time=args.end_time,
+        lat=args.lat,
+        lon=args.lon,
+        radius_km=args.radius_km,
+    )
 
-    asset_ids = meta.get("asset_ids", [])
-    candidate_ids = [asset_ids[i] for i, _ in pairs if i < len(asset_ids)]
+    # 执行向量搜索
+    query = table.search(query_vec.tolist()).limit(args.top_k)
+    if filter_str:
+        query = query.where(filter_str)
 
-    conn = connect_db(db_path)
-    assets = fetch_asset_context(conn, candidate_ids)
-    conn.close()
+    results_df = query.to_pandas()
 
-    bbox = bbox_filter(args.lat, args.lon, args.radius_km) if args.lat and args.lon else None
-    filtered = apply_filters(assets, args.event_type, args.start_time, args.end_time, bbox)
-
+    # 转换为 JSON 格式
     results = []
-    for i, score in pairs:
-        if i >= len(asset_ids):
-            continue
-        asset_id = asset_ids[i]
-        if asset_id not in filtered:
-            continue
-        info = filtered[asset_id]
-        results.append({"asset_id": asset_id, "score": float(score), **info})
-        if len(results) >= args.top_k:
-            break
+    for _, row in results_df.iterrows():
+        results.append({
+            "asset_id": row["asset_id"],
+            "score": float(row["_distance"]),  # LanceDB 返回距离，越小越相似
+            "file_path": row["file_path"],
+            "file_name": row["file_name"],
+            "captured_at": row["captured_at"],
+            "lat": float(row["lat"]),
+            "lon": float(row["lon"]),
+            "event_type": row["event_type"],
+            "alarm_time": row["alarm_time"],
+            "alarm_level": row["alarm_level"],
+        })
 
     print(json.dumps(results, ensure_ascii=True, indent=2))
 

@@ -40,29 +40,22 @@ echo ""
 echo "=== 开始重新入库 ==="
 
 # 1. 清理旧数据
-echo "步骤 1/4: 清理旧数据..."
-rm -rf poc/data/embeddings/*
-rm -rf poc/data/index/*
+echo "步骤 1/3: 清理旧数据..."
+rm -rf poc/data/lancedb/*
 rm -f poc/data/metadata.db
 echo "✓ 清理完成"
 
 # 2. 重新导入结构化数据
 echo ""
-echo "步骤 2/4: 导入结构化数据..."
+echo "步骤 2/3: 导入结构化数据..."
 python -m poc.pipeline.ingest
 echo "✓ 导入完成"
 
-# 3. 生成向量嵌入
+# 3. 生成向量嵌入并写入 LanceDB
 echo ""
-echo "步骤 3/4: 生成向量嵌入（这可能需要几分钟）..."
+echo "步骤 3/3: 生成向量嵌入并写入 LanceDB（这可能需要几分钟）..."
 python -m poc.pipeline.embed
 echo "✓ 嵌入完成"
-
-# 4. 构建向量索引
-echo ""
-echo "步骤 4/4: 构建向量索引..."
-python -m poc.search.index
-echo "✓ 索引完成"
 
 echo ""
 echo "=== 重新入库完成 ==="
