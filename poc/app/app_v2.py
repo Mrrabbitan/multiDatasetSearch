@@ -25,11 +25,8 @@ from poc.qa.agent import create_agent
 from poc.qa.trace import init_trace_manager, get_trace_manager
 from poc.qa.tools import init_tool_registry, get_tool_registry
 from poc.search.query import (
-    apply_filters,
-    bbox_filter,
+    build_lance_filter,
     encode_query,
-    fetch_asset_context,
-    load_index,
     load_model,
 )
 
@@ -52,10 +49,11 @@ def get_cached_model(model_name: str, cache_dir: str = None, hf_mirror: str = No
     if hf_mirror:
         import os
         os.environ['HF_ENDPOINT'] = hf_mirror
+        os.environ['HUGGINGFACE_HUB_CACHE'] = cache_dir if cache_dir else os.path.expanduser('~/.cache/huggingface')
         st.info(f"🌐 使用HuggingFace镜像源: {hf_mirror}")
 
     st.info(f"🔄 正在加载模型: {model_name}，请稍候...")
-    model = load_model(model_name)
+    model = load_model(model_name, cache_dir=cache_dir, hf_mirror=hf_mirror)
 
     # 显示模型信息
     dims = model.get_sentence_embedding_dimension()
@@ -65,9 +63,11 @@ def get_cached_model(model_name: str, cache_dir: str = None, hf_mirror: str = No
 
 
 @st.cache_resource
-def get_cached_index(index_dir: Path):
-    """缓存向量索引，避免重复加载"""
-    return load_index(index_dir)
+def get_cached_lancedb(lancedb_dir: Path):
+    """缓存 LanceDB 连接"""
+    import lancedb
+    db = lancedb.connect(str(lancedb_dir))
+    return db
 
 
 @st.cache_resource
@@ -249,7 +249,7 @@ def render_architecture_overview():
                          │
 ┌────────────────────────▼────────────────────────────────────────┐
 │                   数据层 (Data Layer)                            │
-│  SQLite (结构化) | FAISS (向量) | Trace DB (监控)                │
+│  SQLite (结构化) | LanceDB (向量) | Trace DB (监控)              │
 └─────────────────────────────────────────────────────────────────┘
     """, language="text")
 
@@ -521,11 +521,12 @@ def render_multimodal_search():
     st.header("🔍 多模态检索")
 
     st.markdown("""
-    基于 **CLIP 模型** 的向量检索，支持：
+    基于 **CLIP 模型 + LanceDB** 的向量检索，支持：
     - 🖼️ 以图搜图（图像相似度搜索）
     - 📝 文本语义搜索
     - 🔍 图搜文（上传图片查询关联数据）
     - 🎯 多条件过滤（时间、地点、事件类型）
+    - ⚡ 向量与元数据一体化存储，查询更高效
     """)
 
     config = load_config()
@@ -618,16 +619,18 @@ def render_multimodal_search():
         }
 
         with st.spinner("🔍 检索中..."):
-            # 使用优化后的检索逻辑
-            index_dir = resolve_path(config.get("paths", {}).get("index_dir", "poc/data/index"))
+            # 使用 LanceDB 检索
+            lancedb_dir = resolve_path(config.get("paths", {}).get("lancedb_dir", "poc/data/lancedb"))
             search_cfg = config.get("search", {})
             model_name = search_cfg.get("clip_model", "clip-ViT-B-32")
             cache_dir = search_cfg.get("model_cache_dir")
             hf_mirror = search_cfg.get("hf_mirror")
 
             try:
-                meta, index_obj = get_cached_index(index_dir)
+                # 加载模型和 LanceDB
                 model = get_cached_model(model_name, cache_dir=cache_dir, hf_mirror=hf_mirror)
+                db = get_cached_lancedb(lancedb_dir)
+                table = db.open_table("embeddings")
 
                 # 根据检索模式编码查询
                 if search_mode == "📝 文本检索":
@@ -645,71 +648,58 @@ def render_multimodal_search():
                         # 清理临时文件
                         tmp_path.unlink(missing_ok=True)
 
-                # 向量检索
-                if meta.get("backend") == "faiss":
-                    import faiss
-                    scores, idx = index_obj.search(query_vec[None, :], top_k * 3)
-                    pairs = list(zip(idx[0].tolist(), scores[0].tolist()))
-                else:
-                    import numpy as np
-                    vectors = index_obj
-                    scores = np.dot(vectors, query_vec)
-                    idx = np.argsort(-scores)[:top_k * 3]
-                    pairs = list(zip(idx.tolist(), scores[idx].tolist()))
-
-                asset_ids = meta.get("asset_ids", [])
-                candidate_ids = [asset_ids[i] for i, _ in pairs if i < len(asset_ids)]
-
-                conn = connect_db(db_path)
-
-                # 修复问题2：获取完整的资产信息，包括媒体URL
-                placeholders = ",".join(["?"] * len(candidate_ids))
-                rows = conn.execute(
-                    f"""
-                    SELECT a.asset_id, a.file_path, a.file_name, a.captured_at, a.lat, a.lon,
-                           e.event_type, e.alarm_time, e.extra_json
-                    FROM assets a
-                    LEFT JOIN events e ON a.asset_id = e.asset_id
-                    WHERE a.asset_id IN ({placeholders})
-                    """,
-                    candidate_ids,
-                ).fetchall()
-
-                assets = {}
-                for row in rows:
-                    row_dict = dict(row)
-                    # 解析 extra_json 获取媒体URL
-                    if row_dict.get("extra_json"):
-                        try:
-                            extra = json.loads(row_dict["extra_json"])
-                            row_dict["video_url"] = extra.get("video_url", "")
-                            row_dict["file_img_url_src"] = extra.get("file_img_url_src", "")
-                            row_dict["file_img_url_icon"] = extra.get("file_img_url_icon", "")
-                        except:
-                            pass
-                    assets[row_dict["asset_id"]] = row_dict
-
-                conn.close()
-
-                bbox = None
-                if filters.get("lat") is not None and filters.get("lon") is not None:
-                    bbox = bbox_filter(filters.get("lat"), filters.get("lon"), filters.get("radius_km", 5.0))
-
-                filtered = apply_filters(
-                    assets, filters.get("event_type"), filters.get("start_time"), filters.get("end_time"), bbox
+                # 构建 LanceDB 过滤条件
+                filter_str = build_lance_filter(
+                    event_type=filters.get("event_type"),
+                    start_time=filters.get("start_time"),
+                    end_time=filters.get("end_time"),
+                    lat=filters.get("lat"),
+                    lon=filters.get("lon"),
+                    radius_km=filters.get("radius_km", 5.0),
                 )
 
+                # 执行向量搜索
+                query = table.search(query_vec.tolist()).limit(top_k)
+                if filter_str:
+                    query = query.where(filter_str)
+
+                results_df = query.to_pandas()
+
+                # 转换为结果列表
                 results = []
-                for i, score in pairs:
-                    if i >= len(asset_ids):
-                        continue
-                    asset_id = asset_ids[i]
-                    if asset_id not in filtered:
-                        continue
-                    info = filtered[asset_id]
-                    results.append({"asset_id": asset_id, "score": float(score), **info})
-                    if len(results) >= top_k:
-                        break
+                for _, row in results_df.iterrows():
+                    # 从 SQLite 获取 extra_json（媒体URL等）
+                    conn = connect_db(db_path)
+                    event_row = conn.execute(
+                        "SELECT extra_json FROM events WHERE asset_id = ? LIMIT 1",
+                        (row["asset_id"],)
+                    ).fetchone()
+                    conn.close()
+
+                    result_item = {
+                        "asset_id": row["asset_id"],
+                        "score": float(row["_distance"]),  # LanceDB 返回距离
+                        "file_path": row["file_path"],
+                        "file_name": row["file_name"],
+                        "captured_at": row["captured_at"],
+                        "lat": float(row["lat"]),
+                        "lon": float(row["lon"]),
+                        "event_type": row["event_type"],
+                        "alarm_time": row["alarm_time"],
+                        "alarm_level": row["alarm_level"],
+                    }
+
+                    # 解析 extra_json 获取媒体URL
+                    if event_row and event_row["extra_json"]:
+                        try:
+                            extra = json.loads(event_row["extra_json"])
+                            result_item["video_url"] = extra.get("video_url", "")
+                            result_item["file_img_url_src"] = extra.get("file_img_url_src", "")
+                            result_item["file_img_url_icon"] = extra.get("file_img_url_icon", "")
+                        except:
+                            pass
+
+                    results.append(result_item)
 
                 st.success(f"✅ 找到 {len(results)} 条结果")
 
@@ -995,7 +985,7 @@ def main():
         st.markdown("""
         - 🤖 LangGraph
         - 🧠 DeepSeek
-        - 🔍 FAISS
+        - 🔍 LanceDB (向量数据库)
         - 🗄️ SQLite
         - 🎨 Streamlit
         """)
