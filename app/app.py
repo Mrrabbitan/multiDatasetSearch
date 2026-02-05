@@ -23,7 +23,7 @@ from poc.search.query import (
 
 
 def load_config() -> Dict:
-    return load_yaml("poc/config/poc.yaml")
+    return load_yaml("config/poc.yaml")
 
 
 def db_stats(db_path: Path) -> Dict[str, int]:
@@ -40,8 +40,8 @@ def db_stats(db_path: Path) -> Dict[str, int]:
 
 
 def run_search(config: Dict, text: str, filters: Dict, top_k: int) -> List[Dict]:
-    index_dir = resolve_path(config.get("paths", {}).get("index_dir", "poc/data/index"))
-    db_path = resolve_path(config.get("paths", {}).get("db_path", "poc/data/metadata.db"))
+    index_dir = resolve_path(config.get("paths", {}).get("index_dir", "data/index"))
+    db_path = resolve_path(config.get("paths", {}).get("db_path", "data/metadata.db"))
     model_name = config.get("search", {}).get("clip_model", "clip-ViT-B-32")
 
     meta, index_obj = load_index(index_dir)
@@ -89,24 +89,11 @@ def run_search(config: Dict, text: str, filters: Dict, top_k: int) -> List[Dict]
     return results
 
 
-def render_results(results: List[Dict]):
-    for item in results:
-        st.write(item)
-        file_path = item.get("file_path")
-        if file_path and Path(file_path).exists():
-            st.image(file_path, width=360)
-
-
-def main() -> None:
-    st.set_page_config(page_title="多模态视联POC", layout="wide")
-    st.title("多模态视联POC演示")
-
-    config = load_config()
-    db_path = resolve_path(config.get("paths", {}).get("db_path", "poc/data/metadata.db"))
-
-    st.sidebar.header("数据概览")
+def render_search_interface(config: Dict):
+    st.header("数据概览")
+    db_path = resolve_path(config.get("paths", {}).get("db_path", "data/metadata.db"))
     stats = db_stats(db_path)
-    st.sidebar.json(stats)
+    st.json(stats)
 
     st.header("多模态检索")
     col1, col2 = st.columns([2, 1])
@@ -142,6 +129,8 @@ def main() -> None:
         results = run_search(config, query_text, filters, top_k)
         render_results(results)
 
+
+def render_qa_interface(config: Dict, db_path: Path):
     st.header("智能问数")
     question = st.text_input("问题", value="近7天烟火告警数量有多少？")
     if st.button("解析并查询"):
@@ -160,19 +149,87 @@ def main() -> None:
         except Exception as exc:
             st.warning(f"证据检索不可用: {exc}")
 
-    st.header("操作指引")
-    st.code(
-        "\n".join(
-            [
-                "python -m poc.pipeline.ingest --config poc/config/poc.yaml",
-                "python -m poc.pipeline.label_auto --config poc/config/poc.yaml",
-                "python -m poc.pipeline.dataset_build --config poc/config/poc.yaml",
-                "python -m poc.pipeline.train_yolov8 --config poc/config/poc.yaml",
-                "python -m poc.pipeline.embed --config poc/config/poc.yaml",
-                "python -m poc.search.index --config poc/config/poc.yaml",
-            ]
-        )
+
+def render_results(results: List[Dict]):
+    for item in results:
+        st.write(item)
+        file_path = item.get("file_path")
+        if file_path and Path(file_path).exists():
+            st.image(file_path, width=360)
+
+
+def render_labeling_interface_placeholder():
+    """渲染自动标注页面"""
+    st.header("自动标注")
+
+    st.info("""
+    ### 使用说明
+
+    1. 在左侧边栏选择 **自动标注** 功能
+    2. 配置模型路径和图像目录
+    3. 点击 **加载模型** 加载YOLO模型
+    4. 选择图片，点击 **自动检测** 进行标注
+    5. 可以手动添加、编辑、删除标注
+    6. 点击 **保存** 导出YOLO格式标签
+
+    ### 标签格式
+
+    标签保存为YOLO格式，每行:
+    ```
+    class_id x_center y_center width height
+    ```
+
+    ### 运行命令
+
+    ```bash
+    # 启动标注界面
+    streamlit run poc/app/labeling_interface.py
+
+    # 或从主界面进入
+    streamlit run poc/app/app.py
+    ```
+    """)
+
+
+def main() -> None:
+    st.set_page_config(page_title="多模态视联POC", layout="wide")
+    st.title("多模态视联POC演示")
+
+    # 侧边栏导航
+    st.sidebar.header("功能导航")
+    page = st.sidebar.radio(
+        "选择页面",
+        ["多模态检索", "智能问数", "自动标注"]
     )
+
+    config = load_config()
+
+    if page == "多模态检索":
+        render_search_interface(config)
+    elif page == "智能问数":
+        db_path = resolve_path(config.get("paths", {}).get("db_path", "data/metadata.db"))
+        render_qa_interface(config, db_path)
+    elif page == "自动标注":
+        from pipeline.labeling_interface import render_labeling_interface
+        render_labeling_interface()
+
+    # # 底部操作指引
+    # st.header("操作指引")
+    # st.code(
+    #     "\n".join(
+    #         [
+    #             "python -m poc.pipeline.ingest --config poc/config/poc.yaml",
+    #             "python -m poc.pipeline.label_auto --config poc/config/poc.yaml",
+    #             "python -m poc.pipeline.dataset_build --config poc/config/poc.yaml",
+    #             "python -m poc.pipeline.train_yolov8 --config poc/config/poc.yaml",
+    #             "python -m poc.pipeline.embed --config poc/config/poc.yaml",
+    #             "python -m poc.search.index --config poc/config/poc.yaml",
+    #             "",
+    #             "# 启动自动标注界面",
+    #             "streamlit run poc/pipeline/labeling_interface.py",
+    #         ]
+    #     )
+    # )
 
 
 if __name__ == "__main__":

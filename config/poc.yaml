@@ -1,11 +1,11 @@
 paths:
-  raw_images_dir: "poc/data/raw/images"
-  raw_videos_dir: "poc/data/raw/videos"
-  structured_dir: "poc/data/structured"
-  db_path: "poc/data/metadata.db"
-  schema_path: "poc/schema/metadata.sql"
-  embeddings_dir: "poc/data/embeddings"
-  index_dir: "poc/data/index"
+  raw_images_dir: "data/raw/images"
+  raw_videos_dir: "data/raw/videos"
+  structured_dir: "data/structured"
+  db_path: "data/metadata.db"
+  schema_path: "schema/metadata.sql"
+  embeddings_dir: "data/embeddings"
+  index_dir: "data/index"
 
 ingest:
   asset_id_strategy: "sha256"
@@ -20,6 +20,6 @@ search:
   top_k: 10
 
 train:
-  yolo_model: "yolov8n.pt"
+  yolo_model: "yolov8x-worldv2.pt"
   epochs: 10
   imgsz: 640

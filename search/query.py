@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from poc.pipeline.utils import connect_db, load_yaml, resolve_path
+from pipeline.utils import connect_db, load_yaml, resolve_path
 
 try:
     import numpy as np  # type: ignore
