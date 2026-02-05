@@ -17,11 +17,11 @@ ingest:
   default_region: "unknown"
 
 search:
-  clip_model: "clip-ViT-L-14-336"  # 升级到更大的模型，提升相似度准确性
+  clip_model: "clip-ViT-L-14"  # 大型模型，提升相似度准确性
   # 可选模型：
   # - "clip-ViT-B-32" (快速，512维)
-  # - "clip-ViT-L-14" (中等，768维)
-  # - "clip-ViT-L-14-336" (最佳效果，768维，336分辨率)
+  # - "clip-ViT-B-16" (中等，512维)
+  # - "clip-ViT-L-14" (最佳效果，768维)
   top_k: 10
   model_cache_dir: "models"  # 模型缓存目录
   # 模型源设置（国内用户推荐使用镜像源）

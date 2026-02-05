@@ -49,7 +49,9 @@ def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Opti
     # 设置HuggingFace镜像源（国内加速）
     if hf_mirror:
         import os
+        # 设置多个环境变量以确保兼容性
         os.environ['HF_ENDPOINT'] = hf_mirror
+        os.environ['HUGGINGFACE_HUB_CACHE'] = cache_dir if cache_dir else os.path.expanduser('~/.cache/huggingface')
         print(f"使用HuggingFace镜像源: {hf_mirror}")
 
     # 加载模型
