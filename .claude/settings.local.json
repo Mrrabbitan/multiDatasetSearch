@@ -5,7 +5,9 @@
       "Bash(python:*)",
       "Bash(ls:*)",
       "WebSearch",
-      "Bash(dos2unix:*)"
+      "Bash(dos2unix:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
