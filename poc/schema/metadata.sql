@@ -30,12 +30,18 @@ CREATE TABLE IF NOT EXISTS events (
   lon REAL,
   region TEXT,
   extra_json TEXT,
+  summary TEXT,
+  description TEXT,
+  address TEXT,
+  device_name TEXT,
+  confidence_level REAL,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_alarm_time ON events(alarm_time);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_summary ON events(summary);
 
 CREATE TABLE IF NOT EXISTS detections (
   detection_id TEXT PRIMARY KEY,

@@ -568,11 +568,20 @@ def render_multimodal_search():
     query_image = None
 
     if search_mode == "📝 文本检索":
-        col1, col2 = st.columns([2, 1])
+        col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
             query_text = st.text_input("检索文本", value="车辆闯入监控告警")
         with col2:
             top_k = st.number_input("返回数量", min_value=1, max_value=50, value=10)
+        with col3:
+            enable_hybrid = st.checkbox("混合检索", value=True, help="启用向量+关键词混合检索")
+
+        if enable_hybrid:
+            col_w1, col_w2 = st.columns(2)
+            with col_w1:
+                vector_weight = st.slider("向量权重", 0.0, 1.0, 0.7, 0.1)
+            with col_w2:
+                keyword_weight = st.slider("关键词权重", 0.0, 1.0, 0.3, 0.1)
     else:
         # 以图搜图或图搜文
         col1, col2 = st.columns([2, 1])
@@ -683,12 +692,25 @@ def render_multimodal_search():
                     radius_km=filters.get("radius_km", 5.0),
                 )
 
-                # 执行向量搜索
-                query = table.search(query_vec.tolist()).limit(top_k)
-                if filter_str:
-                    query = query.where(filter_str)
-
-                results_df = query.to_pandas()
+                # 执行检索（混合或纯向量）
+                if search_mode == "📝 文本检索" and enable_hybrid and query_text:
+                    # 混合检索
+                    from poc.search.query import hybrid_search
+                    results_df = hybrid_search(
+                        table,
+                        query_vec,
+                        query_text=query_text,
+                        top_k=top_k,
+                        filter_str=filter_str,
+                        vector_weight=vector_weight,
+                        keyword_weight=keyword_weight,
+                    )
+                else:
+                    # 纯向量检索
+                    query = table.search(query_vec.tolist()).limit(top_k)
+                    if filter_str:
+                        query = query.where(filter_str)
+                    results_df = query.to_pandas()
 
                 # 转换为结果列表
                 results = []
@@ -703,7 +725,7 @@ def render_multimodal_search():
 
                     result_item = {
                         "asset_id": row["asset_id"],
-                        "score": float(row["_distance"]),  # LanceDB 返回距离
+                        "score": float(row.get("hybrid_score", row["_distance"])),
                         "file_path": row["file_path"],
                         "file_name": row["file_name"],
                         "captured_at": row["captured_at"],
@@ -712,6 +734,11 @@ def render_multimodal_search():
                         "event_type": row["event_type"],
                         "alarm_time": row["alarm_time"],
                         "alarm_level": row["alarm_level"],
+                        "summary": row.get("summary", ""),
+                        "description": row.get("description", ""),
+                        "address": row.get("address", ""),
+                        "device_name": row.get("device_name", ""),
+                        "confidence_level": float(row["confidence_level"]) if row.get("confidence_level") else None,
                     }
 
                     # 解析 extra_json 获取媒体URL
@@ -868,7 +895,15 @@ def render_multimodal_search():
                                 st.markdown(f"**相似度**: {item['score']:.4f}")
                                 st.write(f"**事件类型**: {item.get('event_type', 'N/A')}")
                                 st.write(f"**时间**: {item.get('alarm_time', 'N/A')}")
-                                st.write(f"**位置**: ({item.get('lat', 'N/A')}, {item.get('lon', 'N/A')})")
+                                st.write(f"**位置**: {item.get('address', 'N/A')}")
+                                st.write(f"**设备**: {item.get('device_name', 'N/A')}")
+                                if item.get('confidence_level'):
+                                    st.write(f"**置信度**: {item['confidence_level']:.2f}")
+
+                                # 显示图像理解
+                                if item.get('summary'):
+                                    with st.expander("📝 图像理解", expanded=False):
+                                        st.write(item['summary'])
 
                             with col2:
                                 # 显示媒体文件

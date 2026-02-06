@@ -52,9 +52,13 @@ def import_warning_csv(csv_path: str, db_path: str):
                 longitude = row.get('longitude', '')
                 address = row.get('address', '')
                 channel_name = row.get('channel_name', '')
+                device_name = row.get('device_name', '')
                 video_url = row.get('video_url', '')
                 file_img_url_src = row.get('file_img_url_src', '')
                 file_img_url_icon = row.get('file_img_url_icon', '')
+                summary = row.get('summary', '')  # 新增：图像理解字段
+                description = row.get('description', '')
+                confidence_level = row.get('confidence_level_max', row.get('confidence_level', ''))
 
                 # 构建 extra_json（保存所有原始数据）
                 extra_json = {
@@ -62,6 +66,7 @@ def import_warning_csv(csv_path: str, db_path: str):
                     'warning_type_name': warning_type_name,
                     'address': address,
                     'channel_name': channel_name,
+                    'device_name': device_name,
                     'video_url': video_url,
                     'file_img_url_src': file_img_url_src,
                     'file_img_url_icon': file_img_url_icon,
@@ -76,7 +81,7 @@ def import_warning_csv(csv_path: str, db_path: str):
                 file_path = img_urls[0].strip() if img_urls else ''
                 file_name = Path(file_path).name if file_path else ''
 
-                # 插入 assets 表（不包含 address 字段）
+                # 插入 assets 表
                 cursor.execute("""
                     INSERT OR REPLACE INTO assets
                     (asset_id, media_type, file_path, file_name, captured_at, lat, lon, source)
@@ -93,11 +98,12 @@ def import_warning_csv(csv_path: str, db_path: str):
                 ))
                 assets_inserted += 1
 
-                # 插入 events 表
+                # 插入 events 表（新增 summary, description, address, device_name, confidence_level）
                 cursor.execute("""
                     INSERT OR REPLACE INTO events
-                    (event_id, asset_id, event_type, alarm_level, alarm_source, alarm_time, lat, lon, region, extra_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (event_id, asset_id, event_type, alarm_level, alarm_source, alarm_time,
+                     lat, lon, region, extra_json, summary, description, address, device_name, confidence_level)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     warning_order_id,
                     asset_id,
@@ -108,7 +114,12 @@ def import_warning_csv(csv_path: str, db_path: str):
                     float(latitude) if latitude else None,
                     float(longitude) if longitude else None,
                     row.get('province_name', ''),
-                    json.dumps(extra_json, ensure_ascii=False)
+                    json.dumps(extra_json, ensure_ascii=False),
+                    summary,  # 新增
+                    description,  # 新增
+                    address,  # 新增
+                    device_name,  # 新增
+                    float(confidence_level) if confidence_level else None  # 新增
                 ))
                 events_inserted += 1
 
@@ -142,11 +153,16 @@ def import_warning_csv(csv_path: str, db_path: str):
         for row in cursor.fetchall():
             print(f"  - {row[0]}: {row[1]} 条")
 
+        # 验证 summary 字段
+        cursor.execute("SELECT COUNT(*) FROM events WHERE summary IS NOT NULL AND summary != ''")
+        summary_count = cursor.fetchone()[0]
+        print(f"\n包含图像理解的记录: {summary_count} 条")
+
     conn.close()
 
 
 if __name__ == "__main__":
-    csv_path = "告警明细表.csv"
+    csv_path = "最终标注入库数据.csv"  # 使用新的CSV文件
     db_path = "poc/data/metadata.db"
 
     print("="*60)

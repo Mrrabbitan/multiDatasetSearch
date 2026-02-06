@@ -69,6 +69,92 @@ def encode_query(model, text: Optional[str], image_path: Optional[Path]):
     raise RuntimeError("Specify text or image for query.")
 
 
+def keyword_match_score(query_text: str, summary: str) -> float:
+    """
+    计算关键词匹配得分
+
+    Args:
+        query_text: 查询文本
+        summary: 图像理解文本
+
+    Returns:
+        匹配得分 (0-1)
+    """
+    if not query_text or not summary:
+        return 0.0
+
+    query_text = query_text.lower()
+    summary = summary.lower()
+
+    # 简单的关键词匹配：计算查询词在summary中出现的比例
+    query_words = set(query_text.split())
+    if not query_words:
+        return 0.0
+
+    matched_words = sum(1 for word in query_words if word in summary)
+    return matched_words / len(query_words)
+
+
+def hybrid_search(
+    table,
+    query_vec,
+    query_text: Optional[str] = None,
+    top_k: int = 10,
+    filter_str: Optional[str] = None,
+    vector_weight: float = 0.7,
+    keyword_weight: float = 0.3,
+):
+    """
+    混合检索：向量相似度 + 关键词匹配
+
+    Args:
+        table: LanceDB 表
+        query_vec: 查询向量
+        query_text: 查询文本（用于关键词匹配）
+        top_k: 返回数量
+        filter_str: 过滤条件
+        vector_weight: 向量相似度权重
+        keyword_weight: 关键词匹配权重
+
+    Returns:
+        混合检索结果 DataFrame
+    """
+    # 先获取更多候选结果（用于重排序）
+    candidate_k = min(top_k * 5, 100)
+
+    # 执行向量搜索
+    query = table.search(query_vec.tolist()).limit(candidate_k)
+    if filter_str:
+        query = query.where(filter_str)
+
+    results_df = query.to_pandas()
+
+    # 如果没有查询文本或没有summary字段，直接返回向量检索结果
+    if not query_text or "summary" not in results_df.columns:
+        return results_df.head(top_k)
+
+    # 计算混合得分
+    scores = []
+    for _, row in results_df.iterrows():
+        # 向量相似度得分（距离越小越相似，转换为相似度）
+        vector_score = 1.0 / (1.0 + float(row["_distance"]))
+
+        # 关键词匹配得分
+        keyword_score = keyword_match_score(query_text, row.get("summary", ""))
+
+        # 混合得分
+        hybrid_score = vector_weight * vector_score + keyword_weight * keyword_score
+        scores.append(hybrid_score)
+
+    # 添加混合得分列
+    results_df["hybrid_score"] = scores
+
+    # 按混合得分排序
+    results_df = results_df.sort_values("hybrid_score", ascending=False)
+
+    return results_df.head(top_k)
+
+
 def build_lance_filter(
     event_type: Optional[str] = None,
     start_time: Optional[str] = None,
@@ -118,6 +204,9 @@ def main() -> None:
     parser.add_argument("--lat", type=float)
     parser.add_argument("--lon", type=float)
     parser.add_argument("--radius-km", type=float, default=5.0)
+    parser.add_argument("--hybrid", action="store_true", help="启用混合检索（向量+关键词）")
+    parser.add_argument("--vector-weight", type=float, default=0.7, help="向量相似度权重")
+    parser.add_argument("--keyword-weight", type=float, default=0.3, help="关键词匹配权重")
     args = parser.parse_args()
 
     if np is None:
@@ -161,19 +250,29 @@ def main() -> None:
         radius_km=args.radius_km,
     )
 
-    # 执行向量搜索
-    query = table.search(query_vec.tolist()).limit(args.top_k)
-    if filter_str:
-        query = query.where(filter_str)
-
-    results_df = query.to_pandas()
+    # 执行检索（混合或纯向量）
+    if args.hybrid and args.text:
+        results_df = hybrid_search(
+            table,
+            query_vec,
+            query_text=args.text,
+            top_k=args.top_k,
+            filter_str=filter_str,
+            vector_weight=args.vector_weight,
+            keyword_weight=args.keyword_weight,
+        )
+    else:
+        query = table.search(query_vec.tolist()).limit(args.top_k)
+        if filter_str:
+            query = query.where(filter_str)
+        results_df = query.to_pandas()
 
     # 转换为 JSON 格式
     results = []
     for _, row in results_df.iterrows():
-        results.append({
+        result_item = {
             "asset_id": row["asset_id"],
-            "score": float(row["_distance"]),  # LanceDB 返回距离，越小越相似
+            "score": float(row.get("hybrid_score", row["_distance"])),
             "file_path": row["file_path"],
             "file_name": row["file_name"],
             "captured_at": row["captured_at"],
@@ -182,9 +281,23 @@ def main() -> None:
             "event_type": row["event_type"],
             "alarm_time": row["alarm_time"],
             "alarm_level": row["alarm_level"],
-        })
+        }
 
-    print(json.dumps(results, ensure_ascii=True, indent=2))
+        # 添加新字段
+        if "summary" in row:
+            result_item["summary"] = row["summary"]
+        if "description" in row:
+            result_item["description"] = row["description"]
+        if "address" in row:
+            result_item["address"] = row["address"]
+        if "device_name" in row:
+            result_item["device_name"] = row["device_name"]
+        if "confidence_level" in row:
+            result_item["confidence_level"] = float(row["confidence_level"])
+
+        results.append(result_item)
+
+    print(json.dumps(results, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
