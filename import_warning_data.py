@@ -60,34 +60,52 @@ def import_warning_csv(csv_path: str, db_path: str):
                 description = row.get('description', '')
                 confidence_level = row.get('confidence_level_max', row.get('confidence_level', ''))
 
-                # 构建 extra_json（保存所有原始数据）
-                extra_json = {
-                    'warning_order_id': warning_order_id,
-                    'warning_type_name': warning_type_name,
-                    'address': address,
-                    'channel_name': channel_name,
-                    'device_name': device_name,
-                    'video_url': video_url,
-                    'file_img_url_src': file_img_url_src,
-                    'file_img_url_icon': file_img_url_icon,
-                    'tenant_name': row.get('tenant_name', ''),
-                    'province_name': row.get('province_name', ''),
-                    'city_name': row.get('city_name', ''),
-                    'county_name': row.get('county_name', ''),
-                }
-
                 # 优先使用原图，如果没有则使用框图
                 img_urls = file_img_url_src.split(',') if file_img_url_src else file_img_url_icon.split(',')
                 url_path = img_urls[0].strip() if img_urls else ''
                 file_name = Path(url_path).name if url_path else ''
 
                 # 将 URL 路径转换为本地路径
-                # URL 格式: /12000000034/ThirdAlarm/pic/ZGTT-1313100001_xxx.jpg
-                # 本地格式: warning_img/ZGTT-1313100001_xxx.jpg
+                # 图片 URL: /12000000034/ThirdAlarm/pic/xxx.jpg -> warning_img/xxx.jpg
+                # 视频 URL: /12000000034/ThirdAlarm/video/xxx.mp4 -> warning_file/xxx.mp4
                 if file_name:
                     file_path = f"warning_img/{file_name}"
                 else:
                     file_path = ''
+
+                # 转换视频URL为本地路径
+                local_video_url = ''
+                if video_url:
+                    video_filename = Path(video_url).name
+                    if video_filename:
+                        local_video_url = f"warning_file/{video_filename}"
+
+                # 转换图片URL为本地路径（多个图片用逗号分隔）
+                local_img_url_src = ''
+                if file_img_url_src:
+                    img_filenames = [Path(url.strip()).name for url in file_img_url_src.split(',') if url.strip()]
+                    local_img_url_src = ','.join([f"warning_img/{name}" for name in img_filenames if name])
+
+                local_img_url_icon = ''
+                if file_img_url_icon:
+                    img_filenames = [Path(url.strip()).name for url in file_img_url_icon.split(',') if url.strip()]
+                    local_img_url_icon = ','.join([f"warning_img/{name}" for name in img_filenames if name])
+
+                # 构建 extra_json（使用本地路径）
+                extra_json = {
+                    'warning_order_id': warning_order_id,
+                    'warning_type_name': warning_type_name,
+                    'address': address,
+                    'channel_name': channel_name,
+                    'device_name': device_name,
+                    'video_url': local_video_url,  # 本地路径
+                    'file_img_url_src': local_img_url_src,  # 本地路径
+                    'file_img_url_icon': local_img_url_icon,  # 本地路径
+                    'tenant_name': row.get('tenant_name', ''),
+                    'province_name': row.get('province_name', ''),
+                    'city_name': row.get('city_name', ''),
+                    'county_name': row.get('county_name', ''),
+                }
 
                 # 插入 assets 表
                 cursor.execute("""
