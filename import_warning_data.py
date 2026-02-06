@@ -78,8 +78,16 @@ def import_warning_csv(csv_path: str, db_path: str):
 
                 # 优先使用原图，如果没有则使用框图
                 img_urls = file_img_url_src.split(',') if file_img_url_src else file_img_url_icon.split(',')
-                file_path = img_urls[0].strip() if img_urls else ''
-                file_name = Path(file_path).name if file_path else ''
+                url_path = img_urls[0].strip() if img_urls else ''
+                file_name = Path(url_path).name if url_path else ''
+
+                # 将 URL 路径转换为本地路径
+                # URL 格式: /12000000034/ThirdAlarm/pic/ZGTT-1313100001_xxx.jpg
+                # 本地格式: warning_img/ZGTT-1313100001_xxx.jpg
+                if file_name:
+                    file_path = f"warning_img/{file_name}"
+                else:
+                    file_path = ''
 
                 # 插入 assets 表
                 cursor.execute("""
