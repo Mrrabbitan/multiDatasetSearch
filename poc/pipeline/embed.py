@@ -277,8 +277,12 @@ def main() -> None:
     table = db.create_table(table_name, data=lance_data)
 
     # 创建向量索引（提升查询性能）
-    print("创建向量索引...")
-    table.create_index(metric="cosine", num_partitions=256, num_sub_vectors=96)
+    # 注意：数据量太少时（<256）不创建索引
+    if len(lance_data) >= 256:
+        print("创建向量索引...")
+        table.create_index(metric="cosine", num_partitions=256, num_sub_vectors=96)
+    else:
+        print(f"数据量较少（{len(lance_data)}条），跳过索引创建（需要至少256条）")
 
     print(f"✓ 完成！共处理 {len(lance_data)} 条记录")
     print(f"  - 模型: {model_name}")
