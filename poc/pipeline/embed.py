@@ -137,7 +137,8 @@ def main() -> None:
     assets_data = {}
     for row in conn.execute("""
         SELECT a.asset_id, a.file_path, a.file_name, a.captured_at, a.lat, a.lon,
-               e.event_type, e.alarm_time, e.alarm_level
+               e.event_type, e.alarm_time, e.alarm_level, e.summary, e.description,
+               e.address, e.device_name, e.confidence_level
         FROM assets a
         LEFT JOIN events e ON a.asset_id = e.asset_id
     """).fetchall():
@@ -161,6 +162,11 @@ def main() -> None:
             "event_type": asset_info["event_type"] or "",
             "alarm_time": asset_info["alarm_time"] or "",
             "alarm_level": asset_info["alarm_level"] or "",
+            "summary": asset_info.get("summary") or "",
+            "description": asset_info.get("description") or "",
+            "address": asset_info.get("address") or "",
+            "device_name": asset_info.get("device_name") or "",
+            "confidence_level": float(asset_info["confidence_level"]) if asset_info.get("confidence_level") else 0.0,
             "model_name": model_name,
             "vector": vec.tolist(),  # LanceDB 需要 list 格式
         })
