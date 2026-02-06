@@ -40,23 +40,32 @@ echo ""
 echo "=== 开始重新入库 ==="
 
 # 1. 清理旧数据
-echo "步骤 1/3: 清理旧数据..."
+echo "步骤 1/4: 清理旧数据..."
 rm -rf poc/data/lancedb/*
 rm -f poc/data/metadata.db
 echo "✓ 清理完成"
 
-# 2. 重新导入结构化数据
+# 2. 重新创建数据库结构
 echo ""
-echo "步骤 2/3: 导入结构化数据..."
-python -m poc.pipeline.ingest
-echo "✓ 导入完成"
+echo "步骤 2/4: 创建数据库结构..."
+python -m poc.pipeline.ingest --config poc/config/poc.yaml
+echo "✓ 数据库结构创建完成"
 
-# 3. 生成向量嵌入并写入 LanceDB
+# 3. 导入告警数据（包含 summary 字段）
 echo ""
-echo "步骤 3/3: 生成向量嵌入并写入 LanceDB（这可能需要几分钟）..."
-python -m poc.pipeline.embed
-echo "✓ 嵌入完成"
+echo "步骤 3/4: 导入告警数据（包含图像理解字段）..."
+python import_warning_data.py
+echo "✓ 告警数据导入完成"
+
+# 4. 生成向量嵌入并写入 LanceDB
+echo ""
+echo "步骤 4/4: 生成向量嵌入并写入 LanceDB（这可能需要几分钟）..."
+python -m poc.pipeline.embed --config poc/config/poc.yaml
+echo "✓ 向量嵌入完成"
 
 echo ""
 echo "=== 重新入库完成 ==="
-echo "现在可以重启服务: bash restart_poc.sh"
+echo "数据统计："
+python -c "import sqlite3; conn=sqlite3.connect('poc/data/metadata.db'); print(f'  - Assets: {conn.execute(\"SELECT COUNT(*) FROM assets\").fetchone()[0]}'); print(f'  - Events: {conn.execute(\"SELECT COUNT(*) FROM events\").fetchone()[0]}'); print(f'  - 包含图像理解: {conn.execute(\"SELECT COUNT(*) FROM events WHERE summary IS NOT NULL AND summary != \\\"\\\"\").fetchone()[0]}'); conn.close()"
+echo ""
+echo "现在可以启动应用: streamlit run poc/app/app_v2.py"
