@@ -414,18 +414,6 @@ def render_architecture_overview():
         st.metric("Annotations", f"{stats['annotations']:,}")
     with col5:
         st.metric("Embeddings", f"{stats['embeddings']:,}")
-        **📊 监控追踪**
-        - ✅ 完整链路追踪
-        - ✅ 性能指标统计
-        - ✅ 错误堆栈记录
-        - ✅ 成功率分析
-
-        **🔧 语义层抽象**
-        - ✅ 业务逻辑封装
-        - ✅ 复杂 SQL 隐藏
-        - ✅ 可插拔扩展
-        - ✅ 参数验证
-        """)
 
 
 def render_intelligent_qa():
