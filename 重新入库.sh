@@ -66,6 +66,16 @@ echo "✓ 向量嵌入完成"
 echo ""
 echo "=== 重新入库完成 ==="
 echo "数据统计："
-python -c "import sqlite3; conn=sqlite3.connect('poc/data/metadata.db'); print(f'  - Assets: {conn.execute(\"SELECT COUNT(*) FROM assets\").fetchone()[0]}'); print(f'  - Events: {conn.execute(\"SELECT COUNT(*) FROM events\").fetchone()[0]}'); print(f'  - 包含图像理解: {conn.execute(\"SELECT COUNT(*) FROM events WHERE summary IS NOT NULL AND summary != \\\"\\\"\").fetchone()[0]}'); conn.close()"
+python -c "
+import sqlite3
+conn = sqlite3.connect('poc/data/metadata.db')
+assets_count = conn.execute('SELECT COUNT(*) FROM assets').fetchone()[0]
+events_count = conn.execute('SELECT COUNT(*) FROM events').fetchone()[0]
+summary_count = conn.execute('SELECT COUNT(*) FROM events WHERE summary IS NOT NULL AND summary != \"\"').fetchone()[0]
+print(f'  - Assets: {assets_count}')
+print(f'  - Events: {events_count}')
+print(f'  - 包含图像理解: {summary_count}')
+conn.close()
+"
 echo ""
 echo "现在可以启动应用: streamlit run poc/app/app_v2.py"
