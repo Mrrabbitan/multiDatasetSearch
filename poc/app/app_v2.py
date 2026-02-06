@@ -306,16 +306,23 @@ def render_intelligent_qa():
     # 初始化 session_state
     if 'selected_question' not in st.session_state:
         st.session_state.selected_question = "近7天车辆闯入监控告警有多少条？"
+    if 'question_changed' not in st.session_state:
+        st.session_state.question_changed = False
 
     # 问题输入
     col1, col2 = st.columns([3, 1])
     with col1:
+        # 使用 session_state 作为默认值，但允许用户修改
         question = st.text_input(
             "请输入您的问题",
-            value=st.session_state.selected_question,
+            value=st.session_state.selected_question if st.session_state.question_changed else st.session_state.selected_question,
             placeholder="例如：查询最近10条告警",
             key="question_input"
         )
+        # 如果用户修改了输入框，更新 session_state
+        if question != st.session_state.selected_question:
+            st.session_state.selected_question = question
+            st.session_state.question_changed = True
     with col2:
         enable_trace = st.checkbox("启用追踪", value=True, help="记录完整执行过程")
 
@@ -332,7 +339,9 @@ def render_intelligent_qa():
     for i, q in enumerate(preset_questions):
         if cols[i].button(f"📝 {q[:10]}...", key=f"preset_{i}"):
             st.session_state.selected_question = q
-            st.rerun()
+            st.session_state.question_changed = False
+            # 不使用 st.rerun()，而是让用户点击执行查询按钮
+            st.info(f"已选择: {q}，请点击下方「执行查询」按钮")
 
     if st.button("🚀 执行查询", type="primary", use_container_width=True):
         config = load_config()

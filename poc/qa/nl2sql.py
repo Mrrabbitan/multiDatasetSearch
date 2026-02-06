@@ -48,7 +48,7 @@ def _parse_time_range(text: str) -> Tuple[Optional[str], Optional[str]]:
     if match:
         value = int(match.group(1))
         unit = match.group(2)
-        end = datetime.utcnow()
+        end = datetime.now()  # 使用本地时间，而不是UTC时间
         start = end - (timedelta(days=value) if unit == "天" else timedelta(hours=value))
         # 使用空格格式而不是ISO格式的T，以匹配数据库中的时间格式
         return start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S")
