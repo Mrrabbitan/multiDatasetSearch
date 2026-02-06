@@ -135,6 +135,7 @@ def main() -> None:
     # 从 SQLite 获取资产元数据
     conn = connect_db(db_path)
     assets_data = {}
+    assets_by_filename = {}  # 新增：通过文件名索引
     for row in conn.execute("""
         SELECT a.asset_id, a.file_path, a.file_name, a.captured_at, a.lat, a.lon,
                e.event_type, e.alarm_time, e.alarm_level, e.summary, e.description,
@@ -142,15 +143,37 @@ def main() -> None:
         FROM assets a
         LEFT JOIN events e ON a.asset_id = e.asset_id
     """).fetchall():
-        assets_data[row["file_path"]] = dict(row)
+        row_dict = dict(row)
+        assets_data[row["file_path"]] = row_dict
+        # 同时通过文件名索引（处理路径不匹配的情况）
+        if row["file_name"]:
+            assets_by_filename[row["file_name"]] = row_dict
     conn.close()
+
+    print(f"数据库中的资产数: {len(assets_data)}")
+    print(f"通过文件名索引的资产数: {len(assets_by_filename)}")
 
     # 准备 LanceDB 数据
     lance_data = []
+    matched_count = 0
+    unmatched_count = 0
+
     for path, vec in embeddings:
+        # 先尝试完整路径匹配
         asset_info = assets_data.get(str(path))
+
+        # 如果路径不匹配，尝试通过文件名匹配
         if not asset_info:
+            filename = Path(path).name
+            asset_info = assets_by_filename.get(filename)
+
+        if not asset_info:
+            unmatched_count += 1
+            if unmatched_count <= 5:  # 只打印前5个未匹配的
+                print(f"  未匹配: {Path(path).name}")
             continue
+
+        matched_count += 1
 
         lance_data.append({
             "asset_id": asset_info["asset_id"],
@@ -172,6 +195,9 @@ def main() -> None:
         })
 
     # 写入 LanceDB
+    print(f"\n匹配统计:")
+    print(f"  - 成功匹配: {matched_count} 条")
+    print(f"  - 未匹配: {unmatched_count} 条")
     print(f"写入 LanceDB: {len(lance_data)} 条记录")
     db = lancedb.connect(str(lancedb_dir))
 
