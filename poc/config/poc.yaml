@@ -31,6 +31,9 @@ search:
   model_source: "huggingface"  # 可选: "huggingface", "modelscope"
   # HuggingFace镜像源（国内加速）
   hf_mirror: "https://hf-mirror.com"  # 或 "https://huggingface.co"（国外）
+  # 向量化批处理大小（GPU加速）
+  batch_size: 32  # 默认32，根据GPU显存调整：8GB=16, 12GB=32, 16GB=48, 24GB=64-128
+  auto_batch_size: true  # 自动调整批处理大小（根据GPU显存）
 
 llm:
   enabled: false
