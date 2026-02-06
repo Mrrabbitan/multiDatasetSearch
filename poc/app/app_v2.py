@@ -303,14 +303,16 @@ def render_intelligent_qa():
     - 🛡️ 安全护栏保护
     """)
 
+    # 初始化 session_state
+    if 'selected_question' not in st.session_state:
+        st.session_state.selected_question = "近7天车辆闯入监控告警有多少条？"
+
     # 问题输入
     col1, col2 = st.columns([3, 1])
     with col1:
-        # 使用 session_state 中的问题（如果有的话）
-        default_question = st.session_state.get('selected_question', "近7天车辆闯入监控告警有多少条？")
         question = st.text_input(
             "请输入您的问题",
-            value=default_question,
+            value=st.session_state.selected_question,
             placeholder="例如：查询最近10条告警",
             key="question_input"
         )
@@ -326,15 +328,11 @@ def render_intelligent_qa():
         "查询2026年1月的告警"
     ]
 
-    # 修复问题3：使用 session_state 保存选中的问题
-    if 'selected_question' not in st.session_state:
-        st.session_state.selected_question = question
-
     cols = st.columns(len(preset_questions))
     for i, q in enumerate(preset_questions):
         if cols[i].button(f"📝 {q[:10]}...", key=f"preset_{i}"):
             st.session_state.selected_question = q
-            question = q
+            st.rerun()
 
     if st.button("🚀 执行查询", type="primary", use_container_width=True):
         config = load_config()
@@ -528,6 +526,33 @@ def render_multimodal_search():
     - 🎯 多条件过滤（时间、地点、事件类型）
     - ⚡ 向量与元数据一体化存储，查询更高效
     """)
+
+    # 检查 LanceDB 是否已初始化
+    config = load_config()
+    lancedb_dir = resolve_path(config.get("paths", {}).get("lancedb_dir", "poc/data/lancedb"))
+
+    if not lancedb_dir.exists() or not (lancedb_dir / "embeddings.lance").exists():
+        st.error("⚠️ 向量数据库未初始化")
+        st.markdown("""
+        **请先运行向量化脚本生成 LanceDB 数据：**
+
+        ```bash
+        python -m poc.pipeline.embed --config poc/config/poc.yaml
+        ```
+
+        或者使用快速入库脚本：
+        ```bash
+        ./重新入库.sh
+        ```
+
+        **说明：** 向量化过程会：
+        1. 加载 CLIP 模型（首次运行会下载模型）
+        2. 对所有图片生成向量嵌入
+        3. 创建 LanceDB 向量索引
+
+        完成后即可使用多模态检索功能。
+        """)
+        return
 
     config = load_config()
     db_path = resolve_path(config.get("paths", {}).get("db_path", "poc/data/metadata.db"))
