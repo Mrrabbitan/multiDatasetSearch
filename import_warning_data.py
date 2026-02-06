@@ -129,14 +129,14 @@ def import_warning_csv(csv_path: str, db_path: str):
                 ))
                 assets_inserted += 1
 
-                # 插入 events 表（新增 summary, description, address, device_name, confidence_level）
+                # 插入 events 表（使用 asset_id 作为 event_id，确保一对一关系）
                 cursor.execute("""
                     INSERT OR REPLACE INTO events
                     (event_id, asset_id, event_type, alarm_level, alarm_source, alarm_time,
                      lat, lon, region, extra_json, summary, description, address, device_name, confidence_level)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    warning_order_id,
+                    asset_id,  # 使用 asset_id 作为 event_id，确保唯一性
                     asset_id,
                     warning_type_name,
                     row.get('emergency_level', 'medium'),
