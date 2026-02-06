@@ -984,61 +984,20 @@ def render_system_monitor():
 
 def render_labeling_interface():
     """渲染自动标注页面"""
-    st.header("🏷️ 自动标注工具")
+    # 导入标注界面模块
+    try:
+        from poc.pipeline.labeling_interface import render_labeling_interface as render_labeling
+        render_labeling()
+    except Exception as e:
+        st.error(f"加载自动标注界面失败: {e}")
+        st.info("""
+        **备用方案：**
 
-    st.markdown("""
-    本功能支持：
-    - 🤖 批量自动检测标注（基于 YOLOv8-World）
-    - ✏️ 手动画框标注
-    - 📝 标注结果浏览与编辑
-    - 💾 导出 YOLO 格式标签
-    """)
-
-    st.info("""
-    **使用方式：**
-
-    由于自动标注功能需要独立的交互界面，请使用以下命令单独启动：
-
-    ```bash
-    streamlit run poc/pipeline/labeling_interface.py
-    ```
-
-    或者点击下方按钮在新窗口中打开。
-    """)
-
-    # 提供快速启动按钮
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        if st.button("🚀 启动标注界面", type="primary", use_container_width=True):
-            st.info("请在终端运行: streamlit run poc/pipeline/labeling_interface.py")
-
-    st.markdown("---")
-
-    st.markdown("""
-    ### 功能特性
-
-    **自动检测：**
-    - 支持 YOLOv8-World 多类别检测
-    - 可配置置信度阈值
-    - 批量处理所有图片
-
-    **手动标注：**
-    - 点击式画框标注
-    - 支持多类别选择
-    - 实时预览标注结果
-
-    **标注管理：**
-    - 浏览所有标注结果
-    - 编辑类别和坐标
-    - 删除错误标注
-    - 导出 YOLO 格式
-
-    ### 支持的类别
-
-    person, car, motorcycle, bus, truck, boat, excavator, bulldozer, loader,
-    crane, dump truck, concrete mixer, trailer, van, tractor, forklift,
-    ambulance, fire truck
-    """)
+        如果遇到问题，可以单独启动标注界面：
+        ```bash
+        streamlit run poc/pipeline/labeling_interface.py
+        ```
+        """)
 
 
 # ============================================================================

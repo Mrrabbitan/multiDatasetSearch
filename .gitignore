@@ -6,3 +6,10 @@
 __pycache__
 *.pyc
 .DS_Store
+*.pt
+*.pth
+*.onnx
+*.weights
+/models
+/poc/data/pretrainModel
+/付
