@@ -10,7 +10,9 @@
       "Bash(git commit:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
-      "Bash(git push)"
+      "Bash(git push)",
+      "Bash(git reset:*)",
+      "Bash(git restore:*)"
     ]
   },
   "hooks": {

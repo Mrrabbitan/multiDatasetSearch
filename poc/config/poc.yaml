@@ -5,13 +5,17 @@ paths:
   db_path: "poc/data/metadata.db"
   schema_path: "poc/schema/metadata.sql"
   lancedb_dir: "poc/data/lancedb"  # LanceDB 数据目录
-  trace_db_path: "logs/traces.db"  # 新增：追踪数据库
-  log_dir: "logs"  # 新增：日志目录（项目根目录下）
+  trace_db_path: "logs/traces.db"  # 追踪数据库
+  log_dir: "logs"  # 日志目录（项目根目录下）
+  embeddings_dir: "poc/data/embeddings"  # 向量嵌入目录
+  index_dir: "poc/data/index"  # 索引目录
 
 ingest:
   asset_id_strategy: "sha256"
   structured_files:
     - "alarms_warning.csv"
+    - "alarms.csv"
+    - "alarms.json"
   default_source: "offline_batch"
   default_region: "unknown"
 
@@ -37,14 +41,14 @@ llm:
   mode: "rule"  # options: "rule", "llm", "hybrid"
   api_key: "sk-db6292d5ea9d470889b63392c4a4abde"   # 可选: 测试环境可直接在此填写 DeepSeek 密钥
 
-# 新增：Agent 配置
+# Agent 配置
 agent:
   enabled: true  # 是否启用 LangGraph Agent
   max_retries: 3  # SQL 执行失败后的最大重试次数
   enable_trace: true  # 是否启用追踪记录
   enable_security: true  # 是否启用安全护栏
 
-# 新增：安全配置
+# 安全配置
 security:
   allowed_tables:  # 允许访问的表白名单（空表示允许所有）
     - "events"
@@ -57,6 +61,6 @@ security:
     - "passwords"
 
 train:
-  yolo_model: "yolov8n.pt"
+  yolo_model: "yolov8x-worldv2.pt"  # 默认使用 world v2 模型
   epochs: 10
   imgsz: 640

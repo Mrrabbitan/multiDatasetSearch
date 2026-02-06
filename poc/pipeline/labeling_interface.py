@@ -37,7 +37,7 @@ MODEL_URLS = {
     'yolov8x.pt': 'https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8x.pt',
 }
 
-DEFAULT_MODEL_DIR = "data/pretrainModel"
+DEFAULT_MODEL_DIR = "poc/data/pretrainModel"
 
 
 def get_model_path(model_name: str) -> Path:
@@ -184,7 +184,8 @@ def batch_detect(image_files: List[str], model, confidence: float) -> Dict[str, 
 
 
 def render_labeling_interface():
-    st.set_page_config(page_title="自动标注工具", layout="wide")
+    """渲染自动标注界面"""
+    # 注意：不要在这里调用 st.set_page_config()，因为主应用已经设置过了
 
     # 初始化会话状态
     if 'annotations' not in st.session_state:
@@ -209,15 +210,17 @@ def render_labeling_interface():
     annotations = st.session_state.annotations
     image_files = st.session_state.image_files
 
-    st.title("自动标注工具")
+    st.header("🏷️ 自动标注工具")
 
-    # 侧边栏配置
-    with st.sidebar:
-        st.header("配置")
+    # 侧边栏配置（注意：在主应用中侧边栏已被占用，这里改为主区域配置）
+    st.subheader("配置")
 
+    col_config1, col_config2 = st.columns([1, 1])
+
+    with col_config1:
         # 模型配置
-        st.subheader("模型设置")
-        config = load_yaml("config/poc.yaml")
+        st.markdown("**模型设置**")
+        config = load_yaml("poc/config/poc.yaml")
         model_name = st.selectbox(
             "选择模型",
             options=['yolov8x-worldv2.pt', 'yolov8-worldv2.pt', 'yolov8x.pt'],
@@ -248,22 +251,20 @@ def render_labeling_interface():
         if st.session_state.model_loaded:
             st.caption(f"当前模型: {Path(st.session_state.model_path).name}")
 
-        st.divider()
-
         # 置信度阈值
         confidence = st.slider("检测置信度", 0.1, 0.9, 0.25)
 
+    with col_config2:
         # 路径配置
-        st.divider()
-        st.subheader("路径设置")
+        st.markdown("**路径设置**")
         raw_images_dir = st.text_input(
             "图像目录",
-            value=config.get("paths", {}).get("raw_images_dir", "data/raw/images")
+            value=config.get("paths", {}).get("raw_images_dir", "warning_img")
         )
 
         labels_dir = st.text_input(
             "标签输出目录",
-            value="data/labels/auto"
+            value="poc/data/labels/auto"
         )
         ensure_parent_dir(resolve_path(labels_dir) / ".placeholder")
 
@@ -274,6 +275,8 @@ def render_labeling_interface():
             st.session_state.draw_start = None
             st.session_state.draw_end = None
             st.rerun()
+
+    st.divider()
 
     # 主内容区
     if not image_files:
