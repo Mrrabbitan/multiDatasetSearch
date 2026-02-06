@@ -43,6 +43,7 @@ def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Opti
     """
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
+        import torch  # type: ignore
     except Exception as exc:  # pragma: no cover - optional dependency
         raise RuntimeError(
             "sentence-transformers not installed. Please pip install sentence-transformers."
@@ -55,14 +56,21 @@ def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Opti
         os.environ['HUGGINGFACE_HUB_CACHE'] = cache_dir if cache_dir else os.path.expanduser('~/.cache/huggingface')
         print(f"使用HuggingFace镜像源: {hf_mirror}")
 
+    # 检测GPU
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"使用设备: {device}")
+    if device == 'cuda':
+        print(f"GPU型号: {torch.cuda.get_device_name(0)}")
+        print(f"GPU显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
+
     # 加载模型
     print(f"正在加载模型: {model_name}")
     if cache_dir:
         cache_path = Path(cache_dir)
         cache_path.mkdir(parents=True, exist_ok=True)
-        model = SentenceTransformer(model_name, cache_folder=str(cache_path))
+        model = SentenceTransformer(model_name, cache_folder=str(cache_path), device=device)
     else:
-        model = SentenceTransformer(model_name)
+        model = SentenceTransformer(model_name, device=device)
 
     # 获取向量维度（通过实际编码获取）
     try:
@@ -80,16 +88,69 @@ def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Opti
     return model
 
 
-def embed_images(model, images: List[Path]) -> List[tuple]:
+def embed_images(model, images: List[Path], batch_size: int = 32) -> List[tuple]:
+    """
+    批量生成图像向量嵌入（支持GPU加速）
+
+    Args:
+        model: SentenceTransformer模型
+        images: 图片路径列表
+        batch_size: 批量大小（GPU时可以设置更大）
+
+    Returns:
+        (图片路径, 向量) 的列表
+    """
     if Image is None or np is None:
         raise RuntimeError("Pillow and numpy required for embeddings.")
+
+    print(f"开始批量处理，批量大小: {batch_size}")
+
     outputs = []
-    for i, path in enumerate(images):
-        if (i + 1) % 100 == 0:
-            print(f"  处理进度: {i + 1}/{len(images)}")
-        image = Image.open(path).convert("RGB")
-        vec = model.encode(image, convert_to_numpy=True, normalize_embeddings=True)
-        outputs.append((path, vec))
+    for i in range(0, len(images), batch_size):
+        batch_paths = images[i:i + batch_size]
+        batch_images = []
+
+        # 加载批量图片
+        for path in batch_paths:
+            try:
+                image = Image.open(path).convert("RGB")
+                batch_images.append(image)
+            except Exception as e:
+                print(f"  警告: 无法加载图片 {path}: {e}")
+                continue
+
+        if not batch_images:
+            continue
+
+        # 批量编码
+        try:
+            batch_vecs = model.encode(
+                batch_images,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+                batch_size=len(batch_images),
+                show_progress_bar=False
+            )
+
+            # 保存结果
+            for j, vec in enumerate(batch_vecs):
+                if j < len(batch_paths):
+                    outputs.append((batch_paths[j], vec))
+        except Exception as e:
+            print(f"  警告: 批量编码失败: {e}")
+            # 降级为单张处理
+            for path in batch_paths:
+                try:
+                    image = Image.open(path).convert("RGB")
+                    vec = model.encode(image, convert_to_numpy=True, normalize_embeddings=True)
+                    outputs.append((path, vec))
+                except:
+                    continue
+
+        # 显示进度
+        if (i + batch_size) % 100 == 0 or (i + batch_size) >= len(images):
+            print(f"  处理进度: {min(i + batch_size, len(images))}/{len(images)}")
+
     return outputs
 
 
@@ -97,6 +158,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="POC image embedding with LanceDB")
     parser.add_argument("--config", default="poc/config/poc.yaml")
     parser.add_argument("--mock", action="store_true")
+    parser.add_argument("--batch-size", type=int, default=32, help="批量处理大小（GPU时可设置更大，如64或128）")
     args = parser.parse_args()
 
     if np is None:
@@ -130,7 +192,12 @@ def main() -> None:
         model = load_model(model_name, cache_dir=cache_dir, hf_mirror=hf_mirror)
         dims = model.get_sentence_embedding_dimension()
         print(f"开始生成向量嵌入...")
-        embeddings = embed_images(model, images)
+        import time
+        start_time = time.time()
+        embeddings = embed_images(model, images, batch_size=args.batch_size)
+        elapsed_time = time.time() - start_time
+        print(f"向量生成完成，耗时: {elapsed_time:.2f} 秒")
+        print(f"平均速度: {len(images) / elapsed_time:.2f} 张/秒")
 
     # 从 SQLite 获取资产元数据
     conn = connect_db(db_path)

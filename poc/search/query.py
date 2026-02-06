@@ -33,6 +33,7 @@ def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Opti
     """
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
+        import torch  # type: ignore
     except Exception as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("sentence-transformers not installed.") from exc
 
@@ -44,14 +45,20 @@ def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Opti
         os.environ['HUGGINGFACE_HUB_CACHE'] = cache_dir if cache_dir else os.path.expanduser('~/.cache/huggingface')
         print(f"使用HuggingFace镜像源: {hf_mirror}")
 
+    # 检测GPU
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"使用设备: {device}")
+    if device == 'cuda':
+        print(f"GPU型号: {torch.cuda.get_device_name(0)}")
+
     # 加载模型
     if cache_dir:
         from pathlib import Path
         cache_path = Path(cache_dir)
         cache_path.mkdir(parents=True, exist_ok=True)
-        model = SentenceTransformer(model_name, cache_folder=str(cache_path))
+        model = SentenceTransformer(model_name, cache_folder=str(cache_path), device=device)
     else:
-        model = SentenceTransformer(model_name)
+        model = SentenceTransformer(model_name, device=device)
 
     return model
 
