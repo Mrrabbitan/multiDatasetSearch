@@ -32,6 +32,36 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def auto_detect_batch_size() -> int:
+    """
+    根据GPU显存自动检测最优批处理大小
+
+    Returns:
+        推荐的批处理大小
+    """
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return 16  # CPU模式使用较小批处理
+
+        # 获取GPU显存（GB）
+        gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+
+        # 根据显存推荐批处理大小
+        if gpu_memory_gb < 8:
+            return 16
+        elif gpu_memory_gb < 12:
+            return 32
+        elif gpu_memory_gb < 16:
+            return 48
+        elif gpu_memory_gb < 24:
+            return 64
+        else:
+            return 128  # 24GB+显存
+    except:
+        return 32  # 默认值
+
+
 def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Optional[str] = None):
     """
     加载CLIP模型，支持设置缓存目录和镜像源
@@ -158,7 +188,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="POC image embedding with LanceDB")
     parser.add_argument("--config", default="poc/config/poc.yaml")
     parser.add_argument("--mock", action="store_true")
-    parser.add_argument("--batch-size", type=int, default=32, help="批量处理大小（GPU时可设置更大，如64或128）")
+    parser.add_argument("--batch-size", type=int, help="批量处理大小（覆盖配置文件，GPU时可设置更大，如64或128）")
     args = parser.parse_args()
 
     if np is None:
@@ -173,6 +203,17 @@ def main() -> None:
     model_name = search_cfg.get("clip_model", "clip-ViT-B-32")
     cache_dir = search_cfg.get("model_cache_dir")
     hf_mirror = search_cfg.get("hf_mirror")
+
+    # 确定批处理大小
+    if args.batch_size:
+        batch_size = args.batch_size
+        print(f"使用命令行指定的批处理大小: {batch_size}")
+    elif search_cfg.get("auto_batch_size", False):
+        batch_size = auto_detect_batch_size()
+        print(f"自动检测批处理大小: {batch_size}")
+    else:
+        batch_size = search_cfg.get("batch_size", 32)
+        print(f"使用配置文件的批处理大小: {batch_size}")
 
     raw_images_dir = resolve_path(paths_cfg.get("raw_images_dir", "poc/data/raw/images"))
     db_path = resolve_path(paths_cfg.get("db_path", "poc/data/metadata.db"))
@@ -194,7 +235,7 @@ def main() -> None:
         print(f"开始生成向量嵌入...")
         import time
         start_time = time.time()
-        embeddings = embed_images(model, images, batch_size=args.batch_size)
+        embeddings = embed_images(model, images, batch_size=batch_size)
         elapsed_time = time.time() - start_time
         print(f"向量生成完成，耗时: {elapsed_time:.2f} 秒")
         print(f"平均速度: {len(images) / elapsed_time:.2f} 张/秒")
