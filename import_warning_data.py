@@ -13,9 +13,10 @@ from pathlib import Path
 from datetime import datetime
 
 
-def create_asset_id(row_data: str) -> str:
-    """根据行数据生成唯一的 asset_id"""
-    return hashlib.sha256(row_data.encode()).hexdigest()
+def create_asset_id(warning_order_id: str, file_name: str) -> str:
+    """根据工单ID和文件名生成唯一的 asset_id"""
+    unique_key = f"{warning_order_id}_{file_name}"
+    return hashlib.sha256(unique_key.encode()).hexdigest()
 
 
 def import_warning_csv(csv_path: str, db_path: str):
@@ -41,11 +42,8 @@ def import_warning_csv(csv_path: str, db_path: str):
 
         for row in reader:
             try:
-                # 生成 asset_id
-                warning_order_id = row.get('warning_order_id', '')
-                asset_id = create_asset_id(warning_order_id)
-
                 # 提取关键字段
+                warning_order_id = row.get('warning_order_id', '')
                 alarm_time = row.get('alarm_time', '')
                 warning_type_name = row.get('warning_type_name', '')
                 latitude = row.get('latitude', '')
@@ -64,6 +62,13 @@ def import_warning_csv(csv_path: str, db_path: str):
                 img_urls = file_img_url_src.split(',') if file_img_url_src else file_img_url_icon.split(',')
                 url_path = img_urls[0].strip() if img_urls else ''
                 file_name = Path(url_path).name if url_path else ''
+
+                # 如果没有文件名，跳过这条记录
+                if not file_name:
+                    continue
+
+                # 生成唯一的 asset_id（使用工单ID+文件名）
+                asset_id = create_asset_id(warning_order_id, file_name)
 
                 # 将 URL 路径转换为本地路径
                 # 图片 URL: /12000000034/ThirdAlarm/pic/xxx.jpg -> warning_img/xxx.jpg
