@@ -13,6 +13,7 @@ __pycache__
 /models
 /poc/data/pretrainModel
 /付
+/poc/.git
 
 # 数据文件
 *.csv
