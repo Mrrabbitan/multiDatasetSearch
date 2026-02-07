@@ -1,0 +1,45 @@
+# 数据文件
+*.db
+*.csv
+*.xlsx
+*.xls
+*.zip
+
+# 图片和媒体文件
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.svg
+*.mp4
+*.avi
+
+# 向量和索引文件
+*.npy
+*.npz
+*.faiss
+*.index
+
+# 模型文件
+*.pt
+*.pth
+*.onnx
+*.weights
+/data/pretrainModel
+
+# IDE 配置
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Python
+__pycache__
+*.pyc
+*.log
+
+# 临时文件
+*.cache
+*.tmp
+*.swp

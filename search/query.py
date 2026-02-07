@@ -1,0 +1,311 @@
+import argparse
+import json
+import math
+from pathlib import Path
+from typing import Optional
+
+from poc.pipeline.utils import load_yaml, resolve_path
+
+try:
+    import numpy as np  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    np = None
+
+try:
+    from PIL import Image  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    Image = None
+
+try:
+    import lancedb  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    lancedb = None
+
+
+def load_model(model_name: str, cache_dir: Optional[str] = None, hf_mirror: Optional[str] = None):
+    """
+    加载CLIP模型，支持设置缓存目录和镜像源
+
+    Args:
+        model_name: 模型名称
+        cache_dir: 模型缓存目录
+        hf_mirror: HuggingFace镜像源URL
+    """
+    try:
+        from sentence_transformers import SentenceTransformer  # type: ignore
+        import torch  # type: ignore
+    except Exception as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError("sentence-transformers not installed.") from exc
+
+    # 设置HuggingFace镜像源（国内加速）
+    if hf_mirror:
+        import os
+        # 设置多个环境变量以确保兼容性
+        os.environ['HF_ENDPOINT'] = hf_mirror
+        os.environ['HUGGINGFACE_HUB_CACHE'] = cache_dir if cache_dir else os.path.expanduser('~/.cache/huggingface')
+        print(f"使用HuggingFace镜像源: {hf_mirror}")
+
+    # 检测GPU
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"使用设备: {device}")
+    if device == 'cuda':
+        print(f"GPU型号: {torch.cuda.get_device_name(0)}")
+
+    # 加载模型
+    if cache_dir:
+        from pathlib import Path
+        cache_path = Path(cache_dir)
+        cache_path.mkdir(parents=True, exist_ok=True)
+        model = SentenceTransformer(model_name, cache_folder=str(cache_path), device=device)
+    else:
+        model = SentenceTransformer(model_name, device=device)
+
+    return model
+
+
+def encode_query(model, text: Optional[str], image_path: Optional[Path]):
+    if np is None:
+        raise RuntimeError("numpy is required.")
+    if text:
+        return model.encode(text, convert_to_numpy=True, normalize_embeddings=True)
+    if image_path:
+        if Image is None:
+            raise RuntimeError("Pillow is required for image query.")
+        image = Image.open(image_path).convert("RGB")
+        return model.encode(image, convert_to_numpy=True, normalize_embeddings=True)
+    raise RuntimeError("Specify text or image for query.")
+
+
+def keyword_match_score(query_text: str, summary: str) -> float:
+    """
+    计算关键词匹配得分
+
+    Args:
+        query_text: 查询文本
+        summary: 图像理解文本
+
+    Returns:
+        匹配得分 (0-1)
+    """
+    if not query_text or not summary:
+        return 0.0
+
+    query_text = query_text.lower()
+    summary = summary.lower()
+
+    # 简单的关键词匹配：计算查询词在summary中出现的比例
+    query_words = set(query_text.split())
+    if not query_words:
+        return 0.0
+
+    matched_words = sum(1 for word in query_words if word in summary)
+    return matched_words / len(query_words)
+
+
+def hybrid_search(
+    table,
+    query_vec,
+    query_text: Optional[str] = None,
+    top_k: int = 10,
+    filter_str: Optional[str] = None,
+    vector_weight: float = 0.7,
+    keyword_weight: float = 0.3,
+):
+    """
+    混合检索：向量相似度 + 关键词匹配
+
+    Args:
+        table: LanceDB 表
+        query_vec: 查询向量
+        query_text: 查询文本（用于关键词匹配）
+        top_k: 返回数量
+        filter_str: 过滤条件
+        vector_weight: 向量相似度权重
+        keyword_weight: 关键词匹配权重
+
+    Returns:
+        混合检索结果 DataFrame
+    """
+    # 先获取更多候选结果（用于重排序）
+    candidate_k = min(top_k * 5, 100)
+
+    # 执行向量搜索
+    query = table.search(query_vec.tolist()).limit(candidate_k)
+    if filter_str:
+        query = query.where(filter_str)
+
+    results_df = query.to_pandas()
+
+    # 如果没有查询文本或没有summary字段，直接返回向量检索结果
+    if not query_text or "summary" not in results_df.columns:
+        return results_df.head(top_k)
+
+    # 计算混合得分
+    scores = []
+    for _, row in results_df.iterrows():
+        # 向量相似度得分（距离越小越相似，转换为相似度）
+        vector_score = 1.0 / (1.0 + float(row["_distance"]))
+
+        # 关键词匹配得分
+        keyword_score = keyword_match_score(query_text, row.get("summary", ""))
+
+        # 混合得分
+        hybrid_score = vector_weight * vector_score + keyword_weight * keyword_score
+        scores.append(hybrid_score)
+
+    # 添加混合得分列
+    results_df["hybrid_score"] = scores
+
+    # 按混合得分排序
+    results_df = results_df.sort_values("hybrid_score", ascending=False)
+
+    return results_df.head(top_k)
+
+
+def build_lance_filter(
+    event_type: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    radius_km: float = 5.0,
+) -> Optional[str]:
+    """
+    构建 LanceDB 过滤条件（SQL WHERE 语法）
+    """
+    conditions = []
+
+    if event_type:
+        conditions.append(f"event_type = '{event_type}'")
+
+    if start_time:
+        # 使用 alarm_time 或 captured_at
+        conditions.append(f"(alarm_time >= '{start_time}' OR (alarm_time = '' AND captured_at >= '{start_time}'))")
+
+    if end_time:
+        conditions.append(f"(alarm_time <= '{end_time}' OR (alarm_time = '' AND captured_at <= '{end_time}'))")
+
+    if lat is not None and lon is not None:
+        # 计算边界框
+        lat_delta = radius_km / 111.0
+        lon_delta = radius_km / (111.0 * max(0.1, math.cos(math.radians(lat))))
+        min_lat = lat - lat_delta
+        max_lat = lat + lat_delta
+        min_lon = lon - lon_delta
+        max_lon = lon + lon_delta
+        conditions.append(f"lat >= {min_lat} AND lat <= {max_lat} AND lon >= {min_lon} AND lon <= {max_lon}")
+
+    return " AND ".join(conditions) if conditions else None
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="POC multimodal search query with LanceDB")
+    parser.add_argument("--config", default="poc/config/poc.yaml")
+    parser.add_argument("--text")
+    parser.add_argument("--image")
+    parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--mock", action="store_true")
+    parser.add_argument("--event-type")
+    parser.add_argument("--start-time")
+    parser.add_argument("--end-time")
+    parser.add_argument("--lat", type=float)
+    parser.add_argument("--lon", type=float)
+    parser.add_argument("--radius-km", type=float, default=5.0)
+    parser.add_argument("--hybrid", action="store_true", help="启用混合检索（向量+关键词）")
+    parser.add_argument("--vector-weight", type=float, default=0.7, help="向量相似度权重")
+    parser.add_argument("--keyword-weight", type=float, default=0.3, help="关键词匹配权重")
+    args = parser.parse_args()
+
+    if np is None:
+        raise RuntimeError("numpy is required. Please pip install numpy.")
+
+    if lancedb is None:
+        raise RuntimeError("lancedb is required. Please pip install lancedb.")
+
+    config = load_yaml(args.config)
+    paths_cfg = config.get("paths", {})
+    search_cfg = config.get("search", {})
+    model_name = search_cfg.get("clip_model", "clip-ViT-B-32")
+    cache_dir = search_cfg.get("model_cache_dir")
+    hf_mirror = search_cfg.get("hf_mirror")
+    lancedb_dir = resolve_path(paths_cfg.get("lancedb_dir", "poc/data/lancedb"))
+
+    # 连接 LanceDB
+    db = lancedb.connect(str(lancedb_dir))
+    table = db.open_table("embeddings")
+
+    # 生成查询向量
+    if args.mock:
+        # 获取表的向量维度
+        sample = table.to_pandas().head(1)
+        dims = len(sample['vector'].iloc[0])
+        query_vec = np.random.rand(dims).astype("float32")
+        query_vec /= max(1e-12, float(np.linalg.norm(query_vec)))
+    else:
+        model = load_model(model_name, cache_dir=cache_dir, hf_mirror=hf_mirror)
+        query_vec = encode_query(
+            model, args.text, resolve_path(args.image) if args.image else None
+        ).astype("float32")
+
+    # 构建过滤条件
+    filter_str = build_lance_filter(
+        event_type=args.event_type,
+        start_time=args.start_time,
+        end_time=args.end_time,
+        lat=args.lat,
+        lon=args.lon,
+        radius_km=args.radius_km,
+    )
+
+    # 执行检索（混合或纯向量）
+    if args.hybrid and args.text:
+        results_df = hybrid_search(
+            table,
+            query_vec,
+            query_text=args.text,
+            top_k=args.top_k,
+            filter_str=filter_str,
+            vector_weight=args.vector_weight,
+            keyword_weight=args.keyword_weight,
+        )
+    else:
+        query = table.search(query_vec.tolist()).limit(args.top_k)
+        if filter_str:
+            query = query.where(filter_str)
+        results_df = query.to_pandas()
+
+    # 转换为 JSON 格式
+    results = []
+    for _, row in results_df.iterrows():
+        result_item = {
+            "asset_id": row["asset_id"],
+            "score": float(row.get("hybrid_score", row["_distance"])),
+            "file_path": row["file_path"],
+            "file_name": row["file_name"],
+            "captured_at": row["captured_at"],
+            "lat": float(row["lat"]),
+            "lon": float(row["lon"]),
+            "event_type": row["event_type"],
+            "alarm_time": row["alarm_time"],
+            "alarm_level": row["alarm_level"],
+        }
+
+        # 添加新字段
+        if "summary" in row:
+            result_item["summary"] = row["summary"]
+        if "description" in row:
+            result_item["description"] = row["description"]
+        if "address" in row:
+            result_item["address"] = row["address"]
+        if "device_name" in row:
+            result_item["device_name"] = row["device_name"]
+        if "confidence_level" in row:
+            result_item["confidence_level"] = float(row["confidence_level"])
+
+        results.append(result_item)
+
+    print(json.dumps(results, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
