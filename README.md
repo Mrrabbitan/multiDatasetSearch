@@ -13,9 +13,10 @@
 
 ## 快速开始
 1. 准备离线样本
-   - 图片：`poc/data/raw/images/`
-   - 视频：`poc/data/raw/videos/`
-   - 结构化数据：`poc/data/structured/alarms.csv` 或 `alarms.json`
+   - 图片：`poc/data_offline/images/`
+   - 视频：`poc/data_offline/videos/`
+   - 结构化数据：`poc/data_offline/structured/`（CSV/JSON）
+   - 样本来源参考：`poc/docs/sample_assets.md`
 
 2. 入库与校验
    - `python -m poc.pipeline.ingest --config poc/config/poc.yaml`
@@ -38,7 +39,11 @@
    - `python -m poc.qa.answer --question \"近7天烟火告警数量有多少？\" --with-evidence`
 
 7. 演示界面
-   - `streamlit run poc/app/app.py`
+   - `streamlit run poc/app/app_v2.py`
+   - 旧版入口：`streamlit run poc/app/app.py`
+
+## 说明文档
+- 指标口径：`poc/docs/metrics.md`
 
 ## 依赖
 建议安装：`ultralytics`、`sentence-transformers`、`faiss-cpu`、`pillow`、`opencv-python`、`streamlit`、`numpy`。

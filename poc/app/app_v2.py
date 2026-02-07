@@ -133,66 +133,91 @@ def parse_media_urls(url_string: str) -> List[str]:
     return [url.strip() for url in str(url_string).split(',') if url.strip()]
 
 
-def display_media(video_url: str, img_urls: List[str]):
+def unique_paths(paths: List[Path]) -> List[Path]:
+    seen = set()
+    unique_list = []
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        unique_list.append(path)
+        seen.add(key)
+    return unique_list
+
+
+def get_media_dirs(config: Dict) -> Dict[str, List[Path]]:
+    paths_cfg = config.get("paths", {})
+    raw_images = resolve_path(paths_cfg.get("raw_images_dir", "warning_img"))
+    raw_videos = resolve_path(paths_cfg.get("raw_videos_dir", "warning_file"))
+    image_dirs = unique_paths([raw_images, resolve_path("warning_img")])
+    video_dirs = unique_paths([raw_videos, resolve_path("warning_file")])
+    return {"images": image_dirs, "videos": video_dirs}
+
+
+def build_local_candidates(value: str, base_dirs: List[Path]) -> List[Path]:
+    candidates = [Path(value)]
+    for base_dir in base_dirs:
+        candidates.append(base_dir / Path(value).name)
+        candidates.append(base_dir / value)
+    return unique_paths(candidates)
+
+
+def display_local_image(img_url: str, media_dirs: Dict[str, List[Path]]) -> bool:
+    if not img_url or pd.isna(img_url):
+        return False
+    if str(img_url).startswith("http"):
+        st.image(img_url, use_container_width=True)
+        return True
+    for img_path in build_local_candidates(str(img_url), media_dirs.get("images", [])):
+        if img_path.exists():
+            st.image(str(img_path), use_container_width=True)
+            return True
+    st.caption(f"图片不存在: {Path(str(img_url)).name}")
+    return False
+
+
+def display_media(video_url: str, img_urls: List[str], media_dirs: Dict[str, List[Path]] = None):
     """显示视频和图片（修复问题2）"""
+    if media_dirs is None:
+        try:
+            media_dirs = get_media_dirs(load_config())
+        except Exception:
+            media_dirs = {"images": [Path("warning_img")], "videos": [Path("warning_file")]}
+
     # 显示视频
     if video_url and not pd.isna(video_url):
-        # 尝试多个可能的路径
-        possible_paths = [
-            Path(video_url),
-            Path("warning_file") / Path(video_url).name,
-            Path("warning_file") / video_url,
-            ROOT / video_url,
-            ROOT / "warning_file" / Path(video_url).name
-        ]
+        if str(video_url).startswith("http"):
+            try:
+                st.video(video_url)
+            except Exception as e:
+                st.error(f"视频播放失败: {e}")
+        else:
+            # 尝试多个可能的路径
+            possible_paths = build_local_candidates(str(video_url), media_dirs.get("videos", []))
 
-        video_found = False
-        for video_path in possible_paths:
-            if video_path.exists():
-                try:
-                    # 读取视频文件并显示
-                    with open(video_path, 'rb') as video_file:
-                        video_bytes = video_file.read()
-                        st.video(video_bytes)
-                    video_found = True
-                    break
-                except Exception as e:
-                    st.warning(f"视频加载失败: {e}")
-                    continue
+            video_found = False
+            for video_path in possible_paths:
+                if video_path.exists():
+                    try:
+                        # 读取视频文件并显示
+                        with open(video_path, 'rb') as video_file:
+                            video_bytes = video_file.read()
+                            st.video(video_bytes)
+                        video_found = True
+                        break
+                    except Exception as e:
+                        st.warning(f"视频加载失败: {e}")
+                        continue
 
-        if not video_found:
-            if video_url.startswith('http'):
-                try:
-                    st.video(video_url)
-                except Exception as e:
-                    st.error(f"视频播放失败: {e}")
-            else:
+            if not video_found:
                 st.info(f"视频文件不存在: {video_url}")
 
     # 显示图片
     if img_urls:
         cols = st.columns(min(len(img_urls), 3))
         for i, img_url in enumerate(img_urls[:3]):  # 最多显示3张
-            # 尝试多个可能的路径
-            possible_paths = [
-                Path(img_url),
-                Path("warning_img") / Path(img_url).name,
-                Path("warning_img") / img_url
-            ]
-
             with cols[i % 3]:
-                img_found = False
-                for img_path in possible_paths:
-                    if img_path.exists():
-                        st.image(str(img_path), use_container_width=True)
-                        img_found = True
-                        break
-
-                if not img_found:
-                    if img_url.startswith('http'):
-                        st.image(img_url, use_container_width=True)
-                    else:
-                        st.caption(f"图片不存在: {Path(img_url).name}")
+                display_local_image(img_url, media_dirs)
 
 
 # ============================================================================
@@ -200,15 +225,14 @@ def display_media(video_url: str, img_urls: List[str]):
 # ============================================================================
 
 def render_architecture_overview():
-    """渲染架构概览页面"""
-    st.header("🏗️ 多模态数据底座")
+    """渲染演示总览页面"""
+    st.header("⑥ 演示总览")
 
     st.markdown("""
-    ### 🎯 系统定位
-
-    **生产级 RAG + Agent + 多模态检索架构**，融合结构化数据与非结构化数据，
-    实现智能问答、向量检索、自动标注的一体化解决方案。
+    ### 🎯 端到端能力主线（POC）
+    采集/入库 → 自动标注 → 训练 → 多模态检索 → 智能问数 → 演示
     """)
+    st.info("默认演示场景：烟火、违法建设（可替换扩展为盗采/火灾等）")
 
     col1, col2, col3, col4 = st.columns(4)
 
@@ -223,7 +247,51 @@ def render_architecture_overview():
 
     st.markdown("---")
 
-    # 核心技术栈
+    st.subheader("🧭 RAGFlow 原生能力边界（可复用）")
+    st.markdown("""
+    - 多模态数据解析：图片解码、视频关键帧提取
+    - 基础向量嵌入与语义检索能力
+    - 轻量元数据关联与向量库管理
+    """)
+
+    st.subheader("🧩 需定制补齐的核心能力（POC落地核心）")
+    st.markdown("""
+    - **千万级自动化标注引擎**：YOLOv8 批量推理 + 人工轻量审核
+    - **多模态-结构化深度融合**：业务ID绑定、场景标签映射
+    - **空间+时序检索能力**：经纬度范围、时间窗口、组合过滤
+    - **训练与数据集管理**：版本化数据集、模型闭环迭代
+    """)
+
+    st.subheader("🏗️ 定制化分层架构（POC视角）")
+    st.code("""
+┌──────────────────────────── 应用层 ─────────────────────────────┐
+│ 演示界面 | 自动标注工作台 | 时空检索 | 训练控制台 | 监控面板       │
+├──────────────────────────── 服务层 ─────────────────────────────┤
+│ 自动标注服务 | 多模态-结构化融合 | 空间时序检索 | 训练服务        │
+├──────────────────────────── 底座层 ─────────────────────────────┤
+│ RAGFlow: 解析/向量嵌入/向量库 | YOLOv8 | LangGraph | GIS         │
+├──────────────────────────── 数据层 ─────────────────────────────┤
+│ 图片/视频(对象存储) | 结构化库(SQLite/MySQL) | LanceDB           │
+└─────────────────────────────────────────────────────────────────┘
+    """, language="text")
+
+    st.markdown("---")
+
+    st.subheader("📚 知识库体系与内容构建")
+    st.markdown("""
+    - 统一 Schema：assets / events / detections / annotations / embeddings / scene_bindings
+    - 结构化字段绑定：告警、设备、场景标签与多模态资产一体化
+    - 内容构建流程：入库 → 标注 → 训练 → 向量化 → 检索/问数
+    """)
+
+    st.subheader("🛰️ 空间智能与时序检索")
+    st.markdown("""
+    - 经纬度 + 时间字段纳入索引与过滤条件
+    - 支持地理围栏、时间窗口、时空组合检索
+    """)
+
+    st.markdown("---")
+
     st.subheader("💎 核心技术栈")
 
     col1, col2, col3 = st.columns(3)
@@ -231,167 +299,41 @@ def render_architecture_overview():
     with col1:
         st.markdown("""
         **🤖 AI 模型层**
-        - **CLIP-ViT-L-14** (768维)
-          - 图文跨模态理解
-          - GPU批量加速（128 batch）
-          - HuggingFace镜像加速
-        - **YOLOv8-World v2**
-          - 开放词汇目标检测
-          - 18类工程车辆识别
-          - 自动+手动标注
-        - **DeepSeek Chat**
-          - NL2SQL 生成
-          - 智能问答引擎
+        - **CLIP-ViT-L-14** (768维跨模态向量)
+        - **YOLOv8-World v2** (开放词汇检测)
+        - **NL2SQL + Agent** (规则/模型混合)
         """)
 
     with col2:
         st.markdown("""
-        **🗄️ 数据存储层**
-        - **LanceDB** (向量数据库)
-          - 向量+元数据一体化
-          - 混合检索（向量+关键词）
-          - 动态索引优化
-        - **SQLite** (结构化数据)
-          - 告警事件存储
-          - 资产元数据管理
-        - **本地文件系统**
-          - 图片/视频存储
-          - 路径统一管理
+        **🗄️ 数据与检索层**
+        - **LanceDB** 向量库（混合检索）
+        - **SQLite/MySQL** 结构化库
+        - **本地/对象存储** 多媒体资产
         """)
 
     with col3:
         st.markdown("""
-        **🔧 框架工具层**
-        - **LangGraph** (Agent编排)
-          - 状态机工作流
-          - 自我修正机制
-          - 完整链路追踪
-        - **Streamlit** (交互界面)
-          - 多页面应用
-          - 实时可视化
-        - **Sentence-Transformers**
-          - 模型加载管理
-          - GPU自动检测
+        **🔧 编排与可视化**
+        - **LangGraph** 状态机编排
+        - **Streamlit** 交互演示
+        - **GIS/时空索引** 空间智能
         """)
 
     st.markdown("---")
 
-    # 架构图
-    st.subheader("📐 系统架构图")
-    st.code("""
-┌─────────────────────────────────────────────────────────────────┐
-│                    用户交互层 (User Interface)                   │
-│  Streamlit 多页面应用 | 智能问答 | 多模态检索 | 自动标注        │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────────┐
-│                  Agent 层 (LangGraph Orchestration)              │
-│  状态机: Parse → Validate → Execute → Format → Retry            │
-│  ✓ NL2SQL 生成  ✓ 自我修正  ✓ 安全护栏  ✓ 链路追踪             │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────────┐
-│                  AI 模型层 (Model Inference)                     │
-│  CLIP-ViT-L-14 (768维) | YOLOv8-World v2 | DeepSeek Chat       │
-│  ✓ GPU加速  ✓ 批量处理  ✓ 混合检索  ✓ 自动标注                 │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────────┐
-│                  数据存储层 (Data Storage)                       │
-│  LanceDB (向量) | SQLite (结构化) | 本地文件 (图片/视频)        │
-│  ✓ 803条告警  ✓ 772条向量  ✓ 3223张图片                        │
-└─────────────────────────────────────────────────────────────────┘
-    """, language="text")
-
-    st.markdown("---")
-
-    # 核心能力展示
-    st.subheader("🚀 核心能力")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        **🤖 智能问答 (Agent驱动)**
-        - ✅ 自然语言转SQL（NL2SQL）
-        - ✅ SQL执行失败自动重试（最多3次）
-        - ✅ 错误自我修正
-        - ✅ 完整链路追踪
-        - ✅ 安全护栏保护
-
-        **🔍 多模态检索**
-        - ✅ 以图搜图（图像相似度）
-        - ✅ 文本语义搜索
-        - ✅ 混合检索（向量+关键词）
-        - ✅ 多条件过滤（时间/地点/类型）
-        - ✅ GPU加速（4倍速度提升）
-        """)
-
-    with col2:
-        st.markdown("""
-        **🏷️ 自动标注**
-        - ✅ YOLOv8-World 批量检测
-        - ✅ 手动画框标注
-        - ✅ 标注结果编辑
-        - ✅ YOLO格式导出
-        - ✅ 18类车辆识别
-
-        **📊 系统监控**
-        - ✅ 数据统计仪表盘
-        - ✅ 查询历史追踪
-        - ✅ 性能指标监控
-        - ✅ Tool注册中心
-        - ✅ 完整执行日志
-        """)
-
-    st.markdown("---")
-
-    # 性能指标
-    st.subheader("⚡ 性能指标")
+    st.subheader("📊 POC指标（目标口径）")
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.metric("向量化速度", "~80 张/秒", "GPU加速", help="RTX 4090, batch_size=128")
+        st.metric("自动标注准确率", "≥ 90%", "目标值")
     with col2:
-        st.metric("检索延迟", "< 100ms", "亚秒级", help="LanceDB向量检索")
+        st.metric("视频帧处理速度", "≥ 100 帧/秒", "单机GPU")
     with col3:
-        st.metric("问答准确率", "> 95%", "高精度", help="Agent自我修正")
+        st.metric("人工审核占比", "≤ 10%", "低置信度样本")
     with col4:
-        st.metric("数据规模", "803条", "可扩展", help="支持百万级数据")
-
-    st.markdown("---")
-
-    # 技术亮点
-    st.subheader("✨ 技术亮点")
-
-    st.markdown("""
-    1. **GPU自动检测与批量优化**
-       - 根据显存自动调整batch_size（8GB→16, 24GB→128）
-       - 向量化速度提升10-40倍
-       - 支持CPU降级运行
-
-    2. **混合检索算法**
-       - 向量相似度 + 关键词匹配
-       - 可调节权重（默认0.7/0.3）
-       - 图像理解字段（summary）语义搜索
-
-    3. **Agent自我修正机制**
-       - SQL执行失败自动分析错误
-       - 智能修正并重试（最多3次）
-       - 完整链路追踪和日志记录
-
-    4. **一键入库脚本**
-       - 自动清理、入库、向量化
-       - 路径统一转换（URL→本地）
-       - 数据完整性校验
-
-    5. **生产级安全防护**
-       - SQL注入防护
-       - 表访问白名单
-       - 参数自动清理
-       - 危险操作拦截
-    """)
+        st.metric("检索延迟", "< 100ms", "向量检索")
 
     st.markdown("---")
 
@@ -415,10 +357,125 @@ def render_architecture_overview():
     with col5:
         st.metric("Embeddings", f"{stats['embeddings']:,}")
 
+    st.markdown("---")
+    with st.expander("📊 运行监控与追踪（可选）", expanded=False):
+        render_system_monitor(show_header=False)
+
+
+def render_ingest_overview():
+    """渲染采集/入库页面"""
+    st.header("① 采集/入库")
+
+    st.markdown("""
+    **数据输入为离线批量样本**，包含图片/视频与结构化导出。
+    本阶段完成统一入库、字段清洗、事件与资产绑定，为后续标注/训练/检索提供标准化底座。
+    """)
+
+    config = load_config()
+    paths_cfg = config.get("paths", {})
+    raw_images_dir = paths_cfg.get("raw_images_dir", "poc/data_offline/images")
+    raw_videos_dir = paths_cfg.get("raw_videos_dir", "poc/data_offline/videos")
+    structured_dir = paths_cfg.get("structured_dir", "poc/data_offline/structured")
+
+    st.subheader("📁 离线数据目录规范")
+    st.code(f"""
+{raw_images_dir}/
+  - 烟火/违法建设等图片样本
+{raw_videos_dir}/
+  - 视频样本（用于抽帧/标注）
+{structured_dir}/
+  - 结构化告警导出（CSV/JSON）
+    """.strip(), language="text")
+    st.caption("可在 `poc/config/poc.yaml` 中调整目录路径。")
+
+    st.subheader("🔁 入库流程")
+    st.code("""
+python -m poc.pipeline.ingest --config poc/config/poc.yaml
+python -m poc.pipeline.validate --config poc/config/poc.yaml
+    """.strip(), language="text")
+
+    st.subheader("🧩 结构化字段与场景绑定")
+    st.markdown("""
+    - 事件类型与场景标签映射（烟火、违法建设等）
+    - 资产与事件通过 `asset_id` 绑定，形成可追溯链路
+    - 经纬度与告警时间纳入统一字段，支撑时空检索
+    """)
+
+
+def render_labeling_page():
+    """渲染自动标注页面"""
+    st.header("② 自动标注")
+
+    st.markdown("""
+    **多模态标注链路**：视频抽帧 → 目标检测 → 自动标注 → 人工轻量审核 → 场景统一标签 → 数据集导出。
+    """)
+    st.markdown("""
+    - **视频标注**：关键帧抽取 → YOLOv8 检测 → 帧级框选与置信度
+    - **人工标注**：低置信度样本复核 → 纠错 → 回写标注结果
+    - **跨模态绑定**：标注结果与结构化告警字段、时空标签统一对齐
+    """)
+
+    st.subheader("📌 指标与口径")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("自动标注准确率", "≥ 90%", "目标值")
+    col2.metric("视频帧处理速度", "≥ 100 帧/秒", "单机GPU")
+    col3.metric("人工审核占比", "≤ 10%", "低置信度样本")
+    col4.metric("单样本审核时长", "≤ 5 秒", "目标值")
+
+    with st.expander("指标口径说明", expanded=False):
+        st.markdown("""
+        - **准确率**：抽样金标准对比（置信度≥0.9）
+        - **速度**：YOLOv8 推理吞吐（帧/秒）
+        - **审核占比**：低置信度样本比例（自动筛选）
+        - **审核时长**：人工单样本平均修正时间
+        """)
+        st.markdown("详细口径见：`poc/docs/metrics.md`")
+
+    st.subheader("🗺️ 场景库（可替换/扩展）")
+    st.markdown("""
+    - 默认主线：烟火、违法建设
+    - 可扩展：盗采、火灾、占道施工、违规堆放等
+    """)
+    st.markdown("**多目标多场景自动化标注**支持统一标签体系与模型插件化扩展。")
+
+    st.subheader("🧪 演示样本与来源")
+    st.markdown("样本来源与下载建议见：`poc/docs/sample_assets.md`")
+
+    st.markdown("---")
+    st.subheader("🧩 标注工作台")
+    render_labeling_interface()
+
+
+def render_training_workflow():
+    """渲染训练页面"""
+    st.header("③ 训练")
+
+    st.markdown("""
+    基于已标注数据集进行 YOLOv8 训练，形成模型版本与精度评估，
+    训练结果回灌自动标注引擎，实现**标注-训练-检索**的闭环优化。
+    """)
+
+    st.subheader("🔁 训练闭环")
+    st.code("""
+自动标注 → 人工审核 → 数据集构建 → YOLOv8训练 → 模型回灌
+    """.strip(), language="text")
+
+    st.subheader("🧰 训练命令")
+    st.code("""
+python -m poc.pipeline.dataset_build --config poc/config/poc.yaml
+python -m poc.pipeline.train_yolov8 --config poc/config/poc.yaml
+    """.strip(), language="text")
+
+    st.subheader("📈 评估指标（目标口径）")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("mAP@0.5", "≥ 0.85", "目标值")
+    col2.metric("mAP@0.5:0.95", "≥ 0.65", "目标值")
+    col3.metric("训练收敛", "≤ 10 epochs", "POC尺度")
+
 
 def render_intelligent_qa():
     """渲染智能问答页面（展示 Agent 能力）"""
-    st.header("🤖 智能问答（Agent 驱动）")
+    st.header("⑤ 智能问数（Agent 驱动）")
 
     st.markdown("""
     本功能基于 **LangGraph Agent** 实现，支持：
@@ -428,17 +485,32 @@ def render_intelligent_qa():
     - 🛡️ 安全护栏保护
     """)
 
+    st.subheader("📚 知识库体系")
+    st.markdown("""
+    - 资产(assets) → 事件(events) → 检测(detections) → 标注(annotations)
+    - 向量(embeddings) 与场景(scene_bindings) 统一绑定，支撑问数与检索联动
+    """)
+    st.code("""
+assets ──┬── events ──┬── detections
+         │           └── annotations
+         └── embeddings ── scene_bindings
+    """.strip(), language="text")
+
+    st.subheader("🛰️ 时空问数能力")
+    st.markdown("支持经纬度与时间窗口筛选，适用于烟火/违法建设等场景的时空回溯分析。")
+    media_dirs = get_media_dirs(load_config())
+
     # 初始化 session_state
     if 'selected_question' not in st.session_state:
-        st.session_state.selected_question = "近7天车辆闯入监控告警有多少条？"
+        st.session_state.selected_question = "近7天烟火告警有多少条？"
 
     # 预设问题（放在输入框前面）
     st.markdown("**快速选择：**")
     preset_questions = [
-        "近7天车辆闯入监控告警有多少条？",
-        "查询最近的10条告警",
+        "近7天烟火告警有多少条？",
+        "查询最近的10条违法建设告警",
         "统计所有告警数量",
-        "查询2026年1月的告警"
+        "lat=31.23 lon=121.47 半径5公里内近7天烟火告警"
     ]
 
     cols = st.columns(len(preset_questions))
@@ -624,21 +696,7 @@ def render_intelligent_qa():
                                     img_path = row_data[3] if len(row_data) > 3 else None
 
                                 if img_path:
-                                    # 尝试显示图片
-                                    possible_paths = [
-                                        Path(img_path),
-                                        Path("warning_img") / Path(img_path).name,
-                                        ROOT / "warning_img" / Path(img_path).name,
-                                        ROOT / img_path
-                                    ]
-
-                                    img_found = False
-                                    for p in possible_paths:
-                                        if p.exists():
-                                            st.image(str(p), use_container_width=True)
-                                            img_found = True
-                                            break
-
+                                    img_found = display_local_image(str(img_path), media_dirs)
                                     if not img_found:
                                         st.warning(f"图片文件不存在: {img_path}")
                                 else:
@@ -653,7 +711,7 @@ def render_intelligent_qa():
 
 def render_multimodal_search():
     """渲染多模态检索页面"""
-    st.header("🔍 多模态检索")
+    st.header("④ 多模态检索")
 
     st.markdown("""
     基于 **CLIP 模型 + LanceDB** 的向量检索，支持：
@@ -664,8 +722,29 @@ def render_multimodal_search():
     - ⚡ 向量与元数据一体化存储，查询更高效
     """)
 
+    st.subheader("🧠 融合建模（千万级数据）")
+    st.markdown("""
+    在大规模样本场景下，采用 **向量检索 + 结构化字段 + 时空特征** 的多维融合策略：
+    - 视觉向量：CLIP 生成跨模态语义向量
+    - 结构化字段：事件类型、设备、告警级别等
+    - 时空特征：经纬度、时间窗口、区域围栏
+    """)
+    st.code("""
+score = w_visual * sim_visual
+      + w_text   * sim_text
+      + w_struct * sim_struct
+      + w_geo    * sim_spatial
+    """.strip(), language="text")
+
+    st.subheader("🛰️ 空间智能检索")
+    st.markdown("""
+    支持经纬度半径检索与时间窗口筛选，可用于时空回溯与场景追踪。
+    示例：lat=31.23 lon=121.47 半径5公里内近7天烟火告警
+    """)
+
     # 检查 LanceDB 是否已初始化
     config = load_config()
+    media_dirs = get_media_dirs(config)
     lancedb_dir = resolve_path(config.get("paths", {}).get("lancedb_dir", "poc/data/lancedb"))
 
     if not lancedb_dir.exists() or not (lancedb_dir / "embeddings.lance").exists():
@@ -693,6 +772,9 @@ def render_multimodal_search():
 
     config = load_config()
     db_path = resolve_path(config.get("paths", {}).get("db_path", "poc/data/metadata.db"))
+
+    st.markdown("---")
+    st.subheader("🔎 交互式检索")
 
     # 检索模式选择
     search_mode = st.radio(
@@ -737,6 +819,7 @@ def render_multimodal_search():
     # 过滤条件
     with st.expander("🎛️ 高级过滤", expanded=False):
         filter_event = st.text_input("事件类型过滤", value="")
+        st.caption("常用场景：烟火、违法建设、盗采、火灾")
 
         col3, col4, col5 = st.columns(3)
         with col3:
@@ -1015,7 +1098,7 @@ def render_multimodal_search():
                                         img_urls = [file_path]
 
                                 if video_url or img_urls:
-                                    display_media(video_url, img_urls)
+                                    display_media(video_url, img_urls, media_dirs)
                                 else:
                                     st.info("无媒体文件")
 
@@ -1064,7 +1147,7 @@ def render_multimodal_search():
                                         img_urls = [file_path]
 
                                 if video_url or img_urls:
-                                    display_media(video_url, img_urls)
+                                    display_media(video_url, img_urls, media_dirs)
                                 else:
                                     st.info("无媒体文件")
 
@@ -1076,9 +1159,10 @@ def render_multimodal_search():
                 st.code(traceback.format_exc())
 
 
-def render_system_monitor():
+def render_system_monitor(show_header: bool = True):
     """渲染系统监控页面"""
-    st.header("📊 系统监控")
+    if show_header:
+        st.header("📊 系统监控")
 
     config = load_config()
     db_path = resolve_path(config.get("paths", {}).get("db_path", "poc/data/metadata.db"))
@@ -1179,25 +1263,26 @@ def render_labeling_interface():
 def main():
     # 侧边栏
     with st.sidebar:
-        st.title("🏗️ 多模态数据底座")
-        st.markdown("**生产级 RAG + Agent 架构**")
+        st.title("🏗️ 多模态视联POC")
+        st.markdown("**离线批量样本 + 端到端演示**")
         st.markdown("---")
 
         page = st.radio(
             "导航",
-            ["🏠 架构概览", "🤖 智能问答", "🔍 多模态检索", "🏷️ 自动标注", "📊 系统监控"],
+            ["① 采集/入库", "② 自动标注", "③ 训练", "④ 多模态检索", "⑤ 智能问数", "⑥ 演示总览"],
             label_visibility="collapsed"
         )
 
         st.markdown("---")
         st.markdown("### 系统状态")
+        st.success("✅ 离线批量样本模式")
         st.success("✅ Agent 已就绪")
-        st.success("✅ GPU 加速已启用")
         st.success("✅ 混合检索已启用")
 
         st.markdown("---")
         st.markdown("### 核心技术")
         st.markdown("""
+        - 🧱 **RAGFlow** 多模态底座
         - 🤖 **LangGraph** Agent编排
         - 🧠 **DeepSeek** 智能问答
         - 🔍 **LanceDB** 向量数据库
@@ -1209,16 +1294,18 @@ def main():
         """)
 
     # 主页面
-    if page == "🏠 架构概览":
-        render_architecture_overview()
-    elif page == "🤖 智能问答":
-        render_intelligent_qa()
-    elif page == "🔍 多模态检索":
+    if page == "① 采集/入库":
+        render_ingest_overview()
+    elif page == "② 自动标注":
+        render_labeling_page()
+    elif page == "③ 训练":
+        render_training_workflow()
+    elif page == "④ 多模态检索":
         render_multimodal_search()
-    elif page == "🏷️ 自动标注":
-        render_labeling_interface()
-    elif page == "📊 系统监控":
-        render_system_monitor()
+    elif page == "⑤ 智能问数":
+        render_intelligent_qa()
+    elif page == "⑥ 演示总览":
+        render_architecture_overview()
 
 
 if __name__ == "__main__":

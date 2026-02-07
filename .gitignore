@@ -1,0 +1,13 @@
+# Offline data (local only)
+poc/data_offline/images/*
+poc/data_offline/videos/*
+poc/data_offline/structured/*.csv
+poc/data_offline/structured/*.json
+poc/data_offline/structured/*.parquet
+poc/data_offline/structured/*.xlsx
+poc/data_offline/structured/*.tsv
+
+!poc/data_offline/README.md
+!poc/data_offline/images/.gitkeep
+!poc/data_offline/videos/.gitkeep
+!poc/data_offline/structured/README.md

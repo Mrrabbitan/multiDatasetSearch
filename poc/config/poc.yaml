@@ -1,7 +1,7 @@
 paths:
-  raw_images_dir: "warning_img"
-  raw_videos_dir: "warning_file"
-  structured_dir: "poc/data/structured"
+  raw_images_dir: "poc/data_offline/images"
+  raw_videos_dir: "poc/data_offline/videos"
+  structured_dir: "poc/data_offline/structured"
   db_path: "poc/data/metadata.db"
   schema_path: "poc/schema/metadata.sql"
   lancedb_dir: "poc/data/lancedb"  # LanceDB 数据目录
