@@ -13,3 +13,35 @@ __pycache__
 /models
 /poc/data/pretrainModel
 /付
+
+# 数据文件
+*.csv
+*.xlsx
+*.xls
+*.zip
+
+# 图片和媒体文件
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.svg
+*.mp4
+*.avi
+
+# 向量和索引文件
+*.npy
+*.npz
+*.faiss
+*.index
+
+# IDE 配置
+.idea/
+.vscode/
+*.iml
+
+# 临时文件
+*.cache
+*.tmp
+*.swp
