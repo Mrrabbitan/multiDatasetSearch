@@ -1,21 +1,5 @@
-/warning_file
-/warning_img
-/logs
-*.db
-*.log
-__pycache__
-*.pyc
-.DS_Store
-*.pt
-*.pth
-*.onnx
-*.weights
-/models
-/poc/data/pretrainModel
-/付
-/poc/.git
-
 # 数据文件
+*.db
 *.csv
 *.xlsx
 *.xls
@@ -37,10 +21,23 @@ __pycache__
 *.faiss
 *.index
 
+# 模型文件
+*.pt
+*.pth
+*.onnx
+*.weights
+/data/pretrainModel
+
 # IDE 配置
 .idea/
 .vscode/
 *.iml
+.DS_Store
+
+# Python
+__pycache__
+*.pyc
+*.log
 
 # 临时文件
 *.cache

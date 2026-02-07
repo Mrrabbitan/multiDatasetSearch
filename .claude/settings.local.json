@@ -13,7 +13,9 @@
       "Bash(git push)",
       "Bash(git reset:*)",
       "Bash(git restore:*)",
-      "Bash(iconv:*)"
+      "Bash(iconv:*)",
+      "Bash(git branch:*)",
+      "Bash(git init:*)"
     ]
   },
   "hooks": {
