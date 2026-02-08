@@ -38,6 +38,116 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+
+def apply_ant_design_pro_theme():
+    """应用 Ant Design Pro 风格主题"""
+    st.markdown(
+        """
+        <style>
+        :root {
+          --bg-layout: #f0f2f5;
+          --bg-container: #ffffff;
+          --text-primary: #1f1f1f;
+          --text-secondary: #595959;
+          --primary: #1677ff;
+          --primary-hover: #4096ff;
+          --border: #f0f0f0;
+          --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+          --radius: 6px;
+        }
+
+        .stApp {
+          color: var(--text-primary);
+          background: var(--bg-layout);
+          font-family: "Inter", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+        }
+
+        section[data-testid="stSidebar"] {
+          background: var(--bg-container);
+          border-right: 1px solid var(--border);
+        }
+
+        h1, h2, h3, h4, h5 {
+          color: var(--text-primary);
+          letter-spacing: 0.1px;
+        }
+
+        .stMarkdown, .stCaption, .stText, .stAlert {
+          color: var(--text-primary);
+        }
+
+        .stCaption, small {
+          color: var(--text-secondary);
+        }
+
+        [data-testid="stMetric"] {
+          background: var(--bg-container);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 12px 14px;
+          box-shadow: var(--shadow);
+        }
+
+        [data-testid="stMetricLabel"] {
+          color: var(--text-secondary);
+        }
+
+        [data-testid="stMetricValue"] {
+          color: var(--text-primary);
+        }
+
+        .stButton > button {
+          background: var(--primary);
+          color: #ffffff;
+          border: 1px solid var(--primary);
+          border-radius: var(--radius);
+          box-shadow: none;
+          font-weight: 600;
+        }
+
+        .stButton > button:hover {
+          background: var(--primary-hover);
+          border-color: var(--primary-hover);
+        }
+
+        .stTextInput input, .stSelectbox select, .stTextArea textarea {
+          background-color: var(--bg-container);
+          color: var(--text-primary);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+        }
+
+        .stDataFrame, [data-testid="stDataFrame"] {
+          border-radius: var(--radius);
+          border: 1px solid var(--border);
+          box-shadow: var(--shadow);
+          background: var(--bg-container);
+        }
+
+        .stExpander {
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          background: var(--bg-container);
+        }
+
+        code, pre {
+          background: #fafafa;
+          color: var(--text-primary);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+        }
+
+        hr {
+          border-color: var(--border);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+apply_ant_design_pro_theme()
+
 # ============================================================================
 # 缓存函数
 # ============================================================================
@@ -223,144 +333,6 @@ def display_media(video_url: str, img_urls: List[str], media_dirs: Dict[str, Lis
 # ============================================================================
 # 页面渲染函数
 # ============================================================================
-
-def render_architecture_overview():
-    """渲染演示总览页面"""
-    st.header("⑥ 演示总览")
-
-    st.markdown("""
-    ### 🎯 端到端能力主线（POC）
-    采集/入库 → 自动标注 → 训练 → 多模态检索 → 智能问数 → 演示
-    """)
-    st.info("默认演示场景：烟火、违法建设（可替换扩展为盗采/火灾等）")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric("🤖 Agent 引擎", "LangGraph", help="状态机编排，支持自我修正")
-    with col2:
-        st.metric("🔍 向量数据库", "LanceDB", help="GPU加速，混合检索")
-    with col3:
-        st.metric("🧠 多模态模型", "CLIP-ViT-L-14", help="768维向量，语义理解")
-    with col4:
-        st.metric("🏷️ 目标检测", "YOLOv8-World", help="开放词汇检测")
-
-    st.markdown("---")
-
-    st.subheader("🧭 RAGFlow 原生能力边界（可复用）")
-    st.markdown("""
-    - 多模态数据解析：图片解码、视频关键帧提取
-    - 基础向量嵌入与语义检索能力
-    - 轻量元数据关联与向量库管理
-    """)
-
-    st.subheader("🧩 需定制补齐的核心能力（POC落地核心）")
-    st.markdown("""
-    - **千万级自动化标注引擎**：YOLOv8 批量推理 + 人工轻量审核
-    - **多模态-结构化深度融合**：业务ID绑定、场景标签映射
-    - **空间+时序检索能力**：经纬度范围、时间窗口、组合过滤
-    - **训练与数据集管理**：版本化数据集、模型闭环迭代
-    """)
-
-    st.subheader("🏗️ 定制化分层架构（POC视角）")
-    st.code("""
-┌──────────────────────────── 应用层 ─────────────────────────────┐
-│ 演示界面 | 自动标注工作台 | 时空检索 | 训练控制台 | 监控面板       │
-├──────────────────────────── 服务层 ─────────────────────────────┤
-│ 自动标注服务 | 多模态-结构化融合 | 空间时序检索 | 训练服务        │
-├──────────────────────────── 底座层 ─────────────────────────────┤
-│ RAGFlow: 解析/向量嵌入/向量库 | YOLOv8 | LangGraph | GIS         │
-├──────────────────────────── 数据层 ─────────────────────────────┤
-│ 图片/视频(对象存储) | 结构化库(SQLite/MySQL) | LanceDB           │
-└─────────────────────────────────────────────────────────────────┘
-    """, language="text")
-
-    st.markdown("---")
-
-    st.subheader("📚 知识库体系与内容构建")
-    st.markdown("""
-    - 统一 Schema：assets / events / detections / annotations / embeddings / scene_bindings
-    - 结构化字段绑定：告警、设备、场景标签与多模态资产一体化
-    - 内容构建流程：入库 → 标注 → 训练 → 向量化 → 检索/问数
-    """)
-
-    st.subheader("🛰️ 空间智能与时序检索")
-    st.markdown("""
-    - 经纬度 + 时间字段纳入索引与过滤条件
-    - 支持地理围栏、时间窗口、时空组合检索
-    """)
-
-    st.markdown("---")
-
-    st.subheader("💎 核心技术栈")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.markdown("""
-        **🤖 AI 模型层**
-        - **CLIP-ViT-L-14** (768维跨模态向量)
-        - **YOLOv8-World v2** (开放词汇检测)
-        - **NL2SQL + Agent** (规则/模型混合)
-        """)
-
-    with col2:
-        st.markdown("""
-        **🗄️ 数据与检索层**
-        - **LanceDB** 向量库（混合检索）
-        - **SQLite/MySQL** 结构化库
-        - **本地/对象存储** 多媒体资产
-        """)
-
-    with col3:
-        st.markdown("""
-        **🔧 编排与可视化**
-        - **LangGraph** 状态机编排
-        - **Streamlit** 交互演示
-        - **GIS/时空索引** 空间智能
-        """)
-
-    st.markdown("---")
-
-    st.subheader("📊 POC指标（目标口径）")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric("自动标注准确率", "≥ 90%", "目标值")
-    with col2:
-        st.metric("视频帧处理速度", "≥ 100 帧/秒", "单机GPU")
-    with col3:
-        st.metric("人工审核占比", "≤ 10%", "低置信度样本")
-    with col4:
-        st.metric("检索延迟", "< 100ms", "向量检索")
-
-    st.markdown("---")
-
-    # 数据统计
-    config = load_config()
-    db_path = resolve_path(config.get("paths", {}).get("db_path", "poc/data/metadata.db"))
-    stats = db_stats(db_path)
-
-    st.subheader("📊 当前数据统计")
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    with col1:
-        st.metric("Assets", f"{stats['assets']:,}")
-    with col2:
-        st.metric("Events", f"{stats['events']:,}")
-    with col3:
-        st.metric("Detections", f"{stats['detections']:,}")
-    with col4:
-        st.metric("Annotations", f"{stats['annotations']:,}")
-    with col5:
-        st.metric("Embeddings", f"{stats['embeddings']:,}")
-
-    st.markdown("---")
-    with st.expander("📊 运行监控与追踪（可选）", expanded=False):
-        render_system_monitor(show_header=False)
-
 
 def render_ingest_overview():
     """渲染采集/入库页面"""
@@ -1269,7 +1241,7 @@ def main():
 
         page = st.radio(
             "导航",
-            ["① 采集/入库", "② 自动标注", "③ 训练", "④ 多模态检索", "⑤ 智能问数", "⑥ 演示总览"],
+            ["① 采集/入库", "② 自动标注", "③ 训练", "④ 多模态检索", "⑤ 智能问数"],
             label_visibility="collapsed"
         )
 
@@ -1304,8 +1276,6 @@ def main():
         render_multimodal_search()
     elif page == "⑤ 智能问数":
         render_intelligent_qa()
-    elif page == "⑥ 演示总览":
-        render_architecture_overview()
 
 
 if __name__ == "__main__":
