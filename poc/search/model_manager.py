@@ -78,8 +78,9 @@ class ModelManager:
 
         api_url = self.search_config.get("qwen_api_url", _secure_required_env("QWEN_EMBEDDING_API_URL"))
         timeout = self.search_config.get("qwen_timeout", 30)
+        dummy_image = self.search_config.get("qwen_dummy_image", None)
 
-        self.embedding_model = Qwen3VLEmbedding(api_url=api_url, timeout=timeout)
+        self.embedding_model = Qwen3VLEmbedding(api_url=api_url, timeout=timeout, dummy_image=dummy_image)
         print(f"✓ Qwen3-VL 客户端初始化成功: {api_url}")
 
     def _load_reranker(self):
