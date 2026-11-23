@@ -46,3 +46,9 @@ __pycache__
 *.cache
 *.tmp
 *.swp
+# Reviewed original materials are preserved only in the encrypted archive.
+.env
+.env.local
+*.agekey
+.protected/work/
+.protected/keys/
