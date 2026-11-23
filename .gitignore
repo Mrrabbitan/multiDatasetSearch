@@ -1,0 +1,7 @@
+
+# Reviewed original materials are preserved only in the encrypted archive.
+.env
+.env.local
+*.agekey
+.protected/work/
+.protected/keys/
