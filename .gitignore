@@ -11,3 +11,10 @@ poc/data_offline/structured/*.tsv
 !poc/data_offline/images/.gitkeep
 !poc/data_offline/videos/.gitkeep
 !poc/data_offline/structured/README.md
+
+# Reviewed original materials are preserved only in the encrypted archive.
+.env
+.env.local
+*.agekey
+.protected/work/
+.protected/keys/

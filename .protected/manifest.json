@@ -1,0 +1,10 @@
+{
+  "format": "age encrypted Git bundle",
+  "repository": "Mrrabbitan/multiDatasetSearch",
+  "snapshot_date": "2026-11-23",
+  "ciphertext_sha256": "2d9a887aec7e528cc4d8fd30b56727aa521a88ed83cb322380fe117cf886e645",
+  "original_bundle_sha256": "6b3b7f290edd4a4a3e5896dbc537943687268d0c1123a2b8164d44db23504365",
+  "recipient_sha256": "3bb3ae44298730394160644db2504074e5097fdf8c3f8b397d8b8e651a11b42d",
+  "recovery_includes": "Complete pre-remediation branches, tags, and reachable history",
+  "private_key_location": "Not stored in this repository"
+}
